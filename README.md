@@ -18,11 +18,11 @@ Generates fully configured, aligned TrakEM2 XML project workspaces ready for imm
 ---
 ```mermaid
 flowchart TD
-    subgraph Storage [" 1. Ingestion & Caching "]
+    subgraph Storage [" 1. Image Ingestion & Caching "]
         EM["Microscope Acquisition"] --> NAS[("Network Storage<br/>(I:/Maps)")]
         NAS -->|"Delta Sync"| SSD[("Local NVMe Storage<br/>(D:/)")]
         Indexer["nas_indexer.py<br/>(Background Crawler)"] -->|"Update Metadata"| Cache[("%APPDATA%/<br/>fiji_latest_cache.json")]
-        Cache -.->|"Poll Index"| UI["pull_from_NAS.exe<br/>(GUI)"]
+        Cache -.->|"Poll Index"| UI["BioEM-Preview.exe<br/>(GUI)"]
     end
 
     subgraph Automation [" 2. Automation Bridge "]
@@ -37,7 +37,7 @@ flowchart TD
         P2 --> P3["Pass 3: XML State Serialization<br/>(Snapshots purged)"]
     end
 
-    subgraph Output [" 4. Workspace Deliverable "]
+    subgraph Output [" 4. TrakEM Project Workspace "]
         P3 --> XML[("Desktop/&lt;Project&gt;/&lt;Project&gt;.xml<br/>(Aligned TrakEM2 Workspace)")]
     end
 
@@ -49,10 +49,10 @@ flowchart TD
 
 ## Core Features & Active Modules
 
-### 1. Ingestion & Desktop Sync Manager (`pull_from_NAS.py`)
+### 1. Image Ingestion & Desktop Sync Manager (`pull_from_NAS.py`)
 
-**Live Discovery:** Displays acquisitions detected within the last 14 days and catalogs older sessions under an expandable **All Available Data** panel.
-**Smart Delta Synchronization:** Compares file sizes and modification timestamps (`st_mtime`) between NAS and SSD. Skips untouched frames and copies only new or updated `.tif` files.
+**Live Discovery:** Displays acquisitions detected within the last 14 days and or the last 21 acquisition (whichever is larger) and catalogs older sessions under a separate **All Available Data** panel.
+**Smart Delta Synchronization:** Compares file sizes and modification timestamps using (`st_mtime`) between NAS and SSD. Skips untouched frames and copies only new or updated `.tif` files.
 **Coordinate Pattern Extraction:** Parses tile grid configurations via regular expressions (`Tile_<dim1>-<dim2>-<z>`) to support real-time indexing even while an acquisition is actively running.
 **Automated Housekeeping:** Background worker prunes cached folders on `D:/` older than 30 days while protecting core directories and root system paths.
 **Fiji Process Interoperability:** Uses `psutil` to verify whether Fiji is active. If running, it alerts the open instance via a token file (`D:/fiji_trigger.txt`); if closed, it launches a fresh Fiji process with the proper working directory and bundled JRE dependencies.
@@ -65,12 +65,12 @@ Right-clicking any dataset entry in the UI provides:
 
 ### 3. Headless TrakEM2 Assembly Engine (`BioEM_Mosaic.py`)
 * **Two-Pass Hierarchical Registration:**
-  * **Pass 1 (Intra-Layer 2D Montaging):** Stitches tiles belonging to the same physical cut independently using rigid transforms (`AlignTask.montageLayers`), locking internal slice geometry.
-  * **Pass 2 (Inter-Layer Z-Alignment):** Bypasses TrakEM2 modal dialogs (`GenericDialog`) by programmatically wrapping image patches into mathematical `RigidTile2D` models and invoking `Align.alignTileCollections` consecutively along the Z-axis, pinning Layer 0 as the reference anchor.
-* **Compact String Safe Persistence:** Implements resilient serialization routines that purge JVM undo snapshots before XML export, preventing modern Java compact string crashes (`ClassCastException: [B cannot be cast to [C`).
+  * **1st Pass (Intra-Layer 2D Montaging):** Stitches tiles belonging to the same section (in Z) using rigid transforms (`AlignTask.montageLayers`), locking internal slice geometry.
+  * **2nd Pass (Inter-Layer Z-Alignment):** Bypasses TrakEM2 modal dialogs (`GenericDialog`) by wrapping image patches into `RigidTile2D` models and invoking `Align.alignTileCollections` consecutively along the Z-axis, pinning Layer 0 as the reference anchor.
 
 ## Hardware & Software Requirements
 
+The application and associated helper scripts were designed to accomodated MAPS project acquisitions. However, similar Apreo 2S or acquisition systems could probably recycle most of the processing steps with minimal modifications.
 * **Operating System:** Windows 10/11 Pro (x64)
 * **Storage:** Local NVMe SSD dedicated to caching (`D:/`) and mapped high-throughput NAS storage (`I:/`)
 * **Fiji:** Fiji (ImageJ 1.54+) bundled with TrakEM2 and Python/Jython 2.7 scripting support
@@ -82,20 +82,14 @@ You can set up the pipeline either by downloading the pre-packaged release bundl
 
 ### Method A: Quick Start via GitLab Release Bundle (Recommended)
 
-Navigate to the **Releases** section on this GitLab repository.
-Scroll to the latest release assets and download the deployment package (`BioEM_Preview_v0.1.zip`).
+Download the deployment package (`BioEM_Preview_v0.1.zip`). This can be found under the **Releases** section on this GitLab repository.
 Extract the ZIP file and place the individual assets into their designated locations:
 
 | File from ZIP | Destination Target | Description |
-
 | :--- | :--- | :--- |
-
 | `pull_from_NAS.exe` | `Desktop` or `C:\BioEM_Pipeline\` | The standalone GUI application[cite: 1] |
-
 | `nas_indexer.py` | `C:\BioEM_Pipeline\nas_indexer.py` | Headless background scanner daemon |
-
 | `BioEM_Watcher.ijm` | `<Fiji_Path>\macros\AutoRun\BioEM_Watcher.ijm` | Polling macro (runs on Fiji startup) |
-
 | `BioEM_Mosaic.py` | `<Fiji_Path>\macros\BioEM_Mosaic.py` | Headless TrakEM2 alignment script |
 
 > **Note on Fiji Macro Deployment:** If the `<Fiji_Path>\macros\AutoRun\` folder does not exist, create it manually. Any `.ijm` script placed inside `AutoRun` executes automatically whenever Fiji launches.
