@@ -18,80 +18,88 @@ Generates fully configured, aligned TrakEM2 XML project workspaces ready for imm
 ---
 ```mermaid
 flowchart TD
-    %% Top Row Container holding Stage 2 on the left and Stage 1 on the right
-    subgraph TopRow [" "]
-        direction LR
-
-        subgraph Stage2 [" 2. Automation Bridge "]
+    %% -------------------------------------------------------------
+    %% STAGE 1 & STAGE 2: TOP ROW
+    %% -------------------------------------------------------------
+    subgraph Stage1 [" 1. Image Ingestion & Caching "]
+        subgraph ControlPlane [" Ingestion Control "]
             direction TB
-            Trig["D:/fiji_trigger.txt<br/>(Handoff Token)"]
-            Watcher["BioEM_Watcher.ijm<br/>(AutoRun Poller)"]
+            Indexer["nas_indexer.py<br/>(Background Crawler)"]
+            Cache[("%APPDATA%/<br/>fiji_latest_cache.json")]
+            UI["BioEM-Preview.exe<br/>(Desktop GUI)"]
 
-            Trig -->|"AutoRun Poll"| Watcher
+            Indexer -->|"Update Metadata"| Cache
+            Cache -.->|"Poll Index"| UI
         end
 
-        subgraph Stage1 [" 1. Image Ingestion & Caching "]
-            direction LR
+        subgraph DataPlane [" Physical Data Transit "]
+            direction TB
+            EM["MAPS Acquisition / Project"]
+            NAS[("Network Storage<br/>(I:/Maps)")]
+            SSD[("Local NVMe Storage<br/>(D:/)")]
 
-            subgraph ControlPlane [" Ingestion Control "]
-                direction TB
-                Indexer["nas_indexer.py<br/>(Background Crawler)"]
-                Cache[("%APPDATA%/<br/>fiji_latest_cache.json")]
-                UI["BioEM-Preview.exe<br/>(Desktop GUI)"]
-
-                Indexer -->|"Update Metadata"| Cache
-                Cache -.->|"Poll Index"| UI
-            end
-
-            subgraph DataPlane [" Physical Data Transit "]
-                direction TB
-                EM["MAPS Acquisition / Project"]
-                NAS[("Network Storage<br/>(I:/Maps)")]
-                SSD[("Local NVMe Storage<br/>(D:/)")]
-
-                EM --> NAS
-                NAS -->|"Delta Sync"| SSD
-            end
-
-            %% Explicit rank constraints: lock sub-boxes to identical vertical levels
-            Indexer ~~~ EM
-            Indexer -.->|"Scans"| NAS
-            Cache ~~~ NAS
-            UI -.-|"Controls"| SSD
+            EM --> NAS
+            NAS -->|"Delta Sync"| SSD
         end
 
-        %% Link UI to Stage 2 and lock Stage 2's bottom to Stage 1's bottom
-        UI -->|"Write Token"| Trig
-        Watcher ~~~ UI
+        %% Cross-plane references
+        Indexer -.->|"Scans"| NAS
+        UI -.->|"Controls"| SSD
     end
 
-    %% Middle Engine Stage
+    subgraph Stage2 [" 2. Automation Bridge "]
+        direction TB
+        Trig["D:/fiji_trigger.txt<br/>(Handoff Token)"]
+        Watcher["BioEM_Watcher.ijm<br/>(AutoRun Poller)"]
+
+        Trig -->|"AutoRun Poll"| Watcher
+    end
+
+    %% Direct bridge connection across the top tier
+    UI -->|"Write Token"| Trig
+
+    %% -------------------------------------------------------------
+    %% STAGE 3: HEADLESS TRAKEM2 PIPELINE
+    %% -------------------------------------------------------------
     subgraph Stage3 [" 3. Headless Processing & Alignment "]
-        direction LR
+        direction TB
         Script["BioEM_Mosaic.py"]
-        P1["Pass 1: Intra-Layer 2D Montaging<br/>(AlignTask.montageLayers)"]
-        P2["Pass 2: Consecutive Inter-Layer Z-Alignment<br/>(Align.alignTileCollections via RigidTile2D)"]
-        P3["Pass 3: State Export & Memory Cleanup<br/>(Purge undo snapshots)"]
+        
+        subgraph Passes [" Sequential Alignment Passes "]
+            direction LR
+            P1["Pass 1: Intra-Layer 2D Montaging<br/>(AlignTask.montageLayers)"]
+            P2["Pass 2: Consecutive Inter-Layer Z-Alignment<br/>(Align.alignTileCollections via RigidTile2D)"]
+            P3["Pass 3: State Export & Memory Cleanup<br/>(Purge undo snapshots)"]
 
-        Script --> P1 --> P2 --> P3
+            P1 --> P2 --> P3
+        end
+
+        Script --> P1
     end
 
-    %% Bottom Workflows Stage
-    subgraph Stage4 [" 4. Supported Workflows & Outputs "]
-        direction LR
-        WF1["<b>Workflow 1: Regular Z-Stack</b><br/>(Single tile, multiple serial sections)<br/><br/><i>Action:</i> Loaded directly in Fiji<br/>as an inverted <b>Virtual Stack</b>"]
-        WF2["<b>Workflow 2: 2D Spatial Mosaic</b><br/>(Multiple tiles, single layer)<br/><br/><i>Action:</i> Stitched in TrakEM2<br/>via <b>Pass 1</b> (Rigid 2D Montage)"]
-        WF3["<b>Workflow 3: Mosaic Z-Stack</b><br/>(Multiple tiles, multiple serial sections)<br/><br/><i>Action:</i> Stitched in 2D (<b>Pass 1</b>)<br/>then aligned in Z (<b>Pass 2</b>)"]
-    end
-
-    %% Inter-Stage Routing
-    Watcher -->|"Regular Z-Stack"| WF1
+    %% Route to processing engine
     Watcher -->|"Mosaic Series"| Script
+
+    %% -------------------------------------------------------------
+    %% STAGE 4: THREE TARGET DELIVERABLES
+    %% -------------------------------------------------------------
+    subgraph Stage4 [" 4. Supported Workflows & Deliverables "]
+        direction LR
+        WF1["<b>Workflow 1: Regular Z-Stack</b><br/>(Single tile, serial sections)<br/><br/><i>Deliverable:</i> Inverted <b>Virtual Stack</b><br/>in active Fiji session"]
+        WF2["<b>Workflow 2: 2D Spatial Mosaic</b><br/>(Multiple tiles, single layer)<br/><br/><i>Deliverable:</i> Stitched 2D montage<br/>in <b>TrakEM2 Workspace</b>"]
+        WF3["<b>Workflow 3: Mosaic Z-Stack</b><br/>(Multiple tiles, serial sections)<br/><br/><i>Deliverable:</i> Full 3D aligned volume<br/>in <b>TrakEM2 Workspace</b>"]
+
+        WF1 ~~~ WF2 ~~~ WF3
+    end
+
+    %% Downstream outputs
+    Watcher -->|"Regular Z-Stack"| WF1
     P1 -.->|"Output"| WF2
     P3 -.->|"Output"| WF3
 
-    %% Styling
-    style TopRow fill:none,stroke:none
+    %% -------------------------------------------------------------
+    %% THEMING & STYLES
+    %% -------------------------------------------------------------
     style Stage1 fill:#1a1a1a,stroke:#666,stroke-width:1px
     style Stage2 fill:#242424,stroke:#0288d1,stroke-width:2px
     style ControlPlane fill:#242424,stroke:#555,stroke-width:1px
@@ -99,6 +107,7 @@ flowchart TD
     style NAS fill:#e1f5fe,stroke:#0288d1,stroke-width:2px
     style SSD fill:#e8f5e9,stroke:#388e3c,stroke-width:2px
     style Stage3 fill:#1e1e1e,stroke:#888,stroke-width:1px
+    style Passes fill:#141414,stroke:#444,stroke-width:1px
     style Stage4 fill:#1a1a1a,stroke:#aaa,stroke-width:1px
     style WF1 fill:#263238,stroke:#455a64,stroke-width:1px
     style WF2 fill:#1b5e20,stroke:#2e7d32,stroke-width:1px
