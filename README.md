@@ -18,35 +18,57 @@ Generates fully configured, aligned TrakEM2 XML project workspaces ready for imm
 ---
 ```mermaid
 flowchart TD
-    subgraph Storage [" 1. Image Ingestion & Caching "]
-        EM["MAPS Acquisition / Project"] --> NAS[("Network Storage<br/>(I:/Maps)")]
-        NAS -->|"Delta Sync"| SSD[("Local NVMe Storage<br/>(D:/)")]
+    subgraph Stage1 [" 1. Image Ingestion & Caching "]
+        %% Central Execution Spine
         Indexer["nas_indexer.py<br/>(Background Crawler)"] -->|"Update Metadata"| Cache[("%APPDATA%/<br/>fiji_latest_cache.json")]
         Cache -.->|"Poll Index"| UI["BioEM-Preview.exe<br/>(GUI)"]
+
+        %% Isolated Data Plane
+        subgraph DataPlane [" Physical Data Transit "]
+            EM["MAPS Acquisition / Project"] --> NAS[("Network Storage<br/>(I:/Maps)")]
+            NAS -->|"Delta Sync"| SSD[("Local NVMe Storage<br/>(D:/)")]
+        end
+
+        %% Connections between Control and Data planes
+        Indexer -.->|"Scans"| NAS
+        UI -.->|"Controls Transfer"| SSD
     end
 
     subgraph Automation [" 2. Automation Bridge "]
         Trig["D:/fiji_trigger.txt"] -->|"AutoRun Poll"| Watcher["BioEM_Watcher.ijm"]
     end
 
-    subgraph Processing [" 3. Headless TrakEM2 Engine "]
-        Script["BioEM_Mosaic.py"] --> P1["Pass 1: Intra-Layer 2D Montaging<br/>(AlignTask.montageLayers)"]
-        P1 --> P2["Pass 2: Consecutive Inter-Layer Z-Alignment<br/>(Align.alignTileCollections via RigidTile2D)"]
-        P2 --> P3["Pass 3: State Export & Memory Cleanup<br/>(Purge undo snapshots)"]
+    subgraph Processing [" 3. Headless Processing & Alignment "]
+        Script["BioEM_Mosaic.py"]
+        P1["Pass 1: Intra-Layer 2D Montaging<br/>(AlignTask.montageLayers)"]
+        P2["Pass 2: Consecutive Inter-Layer Z-Alignment<br/>(Align.alignTileCollections via RigidTile2D)"]
+        P3["Pass 3: State Export & Snapshot Cleanup"]
+
+        Script --> P1 --> P2 --> P3
     end
 
-    subgraph Output [" 4. TrakEM Project Workspace "]
-        XML[("Desktop/&lt;ProjectName&gt;/&lt;ProjectName&gt;.xml<br/>(Aligned TrakEM2 Workspace)")]
+    subgraph Stage4 [" 4. Supported Workflows & Outputs "]
+        direction TB
+        WF1["<b>Workflow 1: Regular Z-Stack</b><br/>(Single tile, multiple serial sections)<br/><i>Action:</i> Loads into Fiji as an inverted Virtual Stack"]
+        WF2["<b>Workflow 2: 2D Spatial Mosaic</b><br/>(Multiple tiles, single layer)<br/><i>Action:</i> Intra-layer 2D stitching in TrakEM2 (Pass 1)"]
+        WF3["<b>Workflow 3: Mosaic Z-Stack</b><br/>(Multiple tiles, multiple serial sections)<br/><i>Action:</i> Intra-layer stitching (Pass 1) + Consecutive Z-alignment (Pass 2)"]
     end
 
-    %% Inter-stage connections targeting the containers directly
+    %% Pipeline Stage Connections
     UI -->|"Write Token"| Automation
-    Watcher -->|"Executes"| Processing
-    Processing --> Output
+    Watcher -->|"Regular Z-Stack"| WF1
+    Watcher -->|"2D Mosaic / Mosaic Z-Stack"| Processing
+    P1 -.->|"Output"| WF2
+    P3 -.->|"Output"| WF3
 
+    %% Styling
     style NAS fill:#e1f5fe,stroke:#0288d1,stroke-width:2px
     style SSD fill:#e8f5e9,stroke:#388e3c,stroke-width:2px
-    style XML fill:#fff3e0,stroke:#f57c00,stroke-width:2px
+    style DataPlane fill:#1f1f1f,stroke:#666,stroke-dasharray: 4 4
+    style Stage4 fill:#252525,stroke:#999,stroke-width:1px
+    style WF1 fill:#263238,stroke:#455a64,stroke-width:1px
+    style WF2 fill:#1b5e20,stroke:#2e7d32,stroke-width:1px
+    style WF3 fill:#e65100,stroke:#ef6c00,stroke-width:1px
 ```
 
 ## Core Features & Active Modules
