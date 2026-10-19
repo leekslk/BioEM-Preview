@@ -18,48 +18,62 @@ Generates fully configured, aligned TrakEM2 XML project workspaces ready for imm
 ---
 ```mermaid
 flowchart TD
-    %% Top Row: Stage 1 and Stage 2 side-by-side with aligned bottoms
+    %% Top Level Container forcing Stage 1 and Stage 2 to share a bottom baseline
     subgraph TopRow [" "]
         direction LR
 
         subgraph Stage1 [" 1. Image Ingestion & Caching "]
-            direction TB
+            direction LR
+
             subgraph ControlPlane [" Ingestion Control "]
-                Indexer["nas_indexer.py<br/>(Background Crawler)"] -->|"Update Metadata"| Cache[("%APPDATA%/<br/>fiji_latest_cache.json")]
-                Cache -.->|"Poll Index"| UI["BioEM-Preview.exe<br/>(GUI)"]
+                direction TB
+                Indexer["nas_indexer.py<br/>(Background Crawler)"]
+                Cache[("%APPDATA%/<br/>fiji_latest_cache.json")]
+                UI["BioEM-Preview.exe<br/>(Desktop GUI)"]
+
+                Indexer -->|"Update Metadata"| Cache
+                Cache -.->|"Poll Index"| UI
             end
 
             subgraph DataPlane [" Physical Data Transit "]
-                EM["MAPS Acquisition / Project"] --> NAS[("Network Storage<br/>(I:/Maps)")]
-                NAS -->|"Delta Sync"| SSD[("Local NVMe Storage<br/>(D:/)")]
+                direction TB
+                EM["MAPS Acquisition / Project"]
+                NAS[("Network Storage<br/>(I:/Maps)")]
+                SSD[("Local NVMe Storage<br/>(D:/)")]
+
+                EM --> NAS
+                NAS -->|"Delta Sync"| SSD
             end
 
+            %% Symmetric Cross-Links across the two columns
             Indexer -.->|"Scans"| NAS
-            UI -.->|"Controls Transfer"| SSD
+            UI -.->|"Controls"| SSD
         end
 
         subgraph Stage2 [" 2. Automation Bridge "]
             direction TB
             Trig["D:/fiji_trigger.txt<br/>(Handoff Token)"]
             Watcher["BioEM_Watcher.ijm<br/>(AutoRun Poller)"]
+
             Trig -->|"AutoRun Poll"| Watcher
         end
 
-        %% Horizontal connection between UI and Stage 2
+        %% Connection from UI directly into the center of Stage 2
         UI -->|"Write Token"| Trig
     end
 
-    %% Middle Row: Processing Engine
+    %% Middle Engine Stage
     subgraph Stage3 [" 3. Headless Processing & Alignment "]
+        direction LR
         Script["BioEM_Mosaic.py"]
         P1["Pass 1: Intra-Layer 2D Montaging<br/>(AlignTask.montageLayers)"]
         P2["Pass 2: Consecutive Inter-Layer Z-Alignment<br/>(Align.alignTileCollections via RigidTile2D)"]
-        P3["Pass 3: State Export & Snapshot Cleanup<br/>(Purge undo snapshots)"]
+        P3["Pass 3: State Export & Memory Cleanup<br/>(Purge undo snapshots)"]
 
         Script --> P1 --> P2 --> P3
     end
 
-    %% Bottom Row: 3 Workflows & Deliverables
+    %% Bottom Workflows Stage
     subgraph Stage4 [" 4. Supported Workflows & Outputs "]
         direction LR
         WF1["<b>Workflow 1: Regular Z-Stack</b><br/>(Single tile, multiple serial sections)<br/><br/><i>Action:</i> Loaded directly in Fiji<br/>as an inverted <b>Virtual Stack</b>"]
@@ -67,19 +81,20 @@ flowchart TD
         WF3["<b>Workflow 3: Mosaic Z-Stack</b><br/>(Multiple tiles, multiple serial sections)<br/><br/><i>Action:</i> Stitched in 2D (<b>Pass 1</b>)<br/>then aligned in Z (<b>Pass 2</b>)"]
     end
 
-    %% Inter-stage Workflow Connections
+    %% Inter-Stage Routing
     Watcher -->|"Regular Z-Stack"| WF1
     Watcher -->|"Mosaic Series"| Script
     P1 -.->|"Output"| WF2
     P3 -.->|"Output"| WF3
 
-    %% Styling & Balance
+    %% Styling & Theme Alignment
     style TopRow fill:none,stroke:none
+    style Stage1 fill:#1a1a1a,stroke:#666,stroke-width:1px
+    style Stage2 fill:#242424,stroke:#0288d1,stroke-width:2px
+    style ControlPlane fill:#242424,stroke:#555,stroke-width:1px
+    style DataPlane fill:#1c1c1c,stroke:#555,stroke-dasharray: 4 4
     style NAS fill:#e1f5fe,stroke:#0288d1,stroke-width:2px
     style SSD fill:#e8f5e9,stroke:#388e3c,stroke-width:2px
-    style DataPlane fill:#1c1c1c,stroke:#555,stroke-dasharray: 4 4
-    style ControlPlane fill:#242424,stroke:#666
-    style Stage2 fill:#242424,stroke:#0288d1,stroke-width:2px
     style Stage3 fill:#1e1e1e,stroke:#888,stroke-width:1px
     style Stage4 fill:#1a1a1a,stroke:#aaa,stroke-width:1px
     style WF1 fill:#263238,stroke:#455a64,stroke-width:1px
