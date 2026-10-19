@@ -1,0 +1,18 @@
+cat << 'EOF' > .gitignore
+BioEM-preview/
+.venv/
+__pycache__/
+*.py[cod]
+*.spec
+build/
+dist/
+.DS_Store
+
+# Acquisition data and local caches
+*.tif
+*.tiff
+*.xml
+*.zarr/
+*.json
+*trigger.txt
+EOF
