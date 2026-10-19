@@ -60,7 +60,7 @@ flowchart TD
 ### 2. Context Menu & Dataset Operations
 
 Right-clicking any dataset entry in the UI provides:
-**Refresh Folder (Wipe & Sync):** Displays a safety confirmation dialog, deletes the local dataset directory on `D:/`, and executes a fresh synchronization from the NAS source[cite: 1].
+**Refresh Folder (Wipe & Sync):** Displays a safety confirmation dialog, deletes the local dataset directory on `D:/`, and executes a fresh synchronization from the NAS source.
 **Delete Existing Data:** Displays a confirmation prompt showing the target dataset name and permanently purges the local folder from `D:/`.
 
 ### 3. Headless TrakEM2 Assembly Engine (`BioEM_Mosaic.py`)
@@ -87,7 +87,7 @@ Extract the ZIP file and place the individual assets into their designated locat
 
 | File from ZIP | Destination Target | Description |
 | :--- | :--- | :--- |
-| `pull_from_NAS.exe` | `Desktop` or `C:\BioEM_Pipeline\` | The standalone GUI application[cite: 1] |
+| `pull_from_NAS.exe` | `Desktop` or `C:\BioEM_Pipeline\` | The standalone GUI application |
 | `nas_indexer.py` | `C:\BioEM_Pipeline\nas_indexer.py` | Headless background scanner daemon |
 | `BioEM_Watcher.ijm` | `<Fiji_Path>\macros\AutoRun\BioEM_Watcher.ijm` | Polling macro (runs on Fiji startup) |
 | `BioEM_Mosaic.py` | `<Fiji_Path>\macros\BioEM_Mosaic.py` | Headless TrakEM2 alignment script |
@@ -102,44 +102,32 @@ If you prefer to build the binary locally or make modifications to the UI:
 #### 1. Clone the Repository
 
 ```bash
-
 git clone [https://gitlab.com/](https://gitlab.com/)<your-username-or-group>/bioem-pipeline.git C:\BioEM_Pipeline
 
 cd C:\BioEM_Pipeline
-
 ```
 
 #### 2. Set Up Python Environment & Dependencies
 
 ```bash
-
 # Recommended: Python 3.10 virtual environment
-
 python -m venv venv
-
 .\venv\Scripts\activate
 
 # Install required build packages
-
 pip install customtkinter psutil pyinstaller
-
 ```
 
 #### 3. Compile the Executable via PyInstaller
 
-Run PyInstaller directly from the repository root, ensuring the icon asset is bundled so `sys._MEIPASS` can extract it at runtime[cite: 1]:
+Run PyInstaller directly from the repository root, ensuring the icon asset is bundled so `sys._MEIPASS` can extract it at runtime:
 
 ```powershell
 pyinstaller --noconsole `
-
 --onefile `
-
 --icon="app/assets/bioem_app.ico" `
-
 --add-data "app/assets/bioem_app.ico;." `
-
 --name "pull_from_NAS" `
-
 app/pull_from_NAS.py
 ```
 
@@ -147,14 +135,14 @@ The compiled binary will be generated in `dist\pull_from_NAS.exe`.
 
 #### 4. Configure Application Paths
 
-If your workstation uses different drive letters or Fiji directories, adjust the constants near the top of `app/pull_from_NAS.py` before compiling[cite: 1]:
+If your workstation uses different drive letters or Fiji directories, adjust the constants near the top of `app/pull_from_NAS.py` before compiling:
 
 ```python
-DESTINATION_DIR = "D:/" # Local SSD target cache[cite: 1]
+DESTINATION_DIR = "D:/" # Local SSD target cache
 
-NAS_DIR = "I:/" # Mapped NAS drive[cite: 1]
+NAS_DIR = "I:/" # Mapped NAS drive
 
-APP_PATH = r"C:\Users\User\Desktop\Fiji\fiji-windows-x64.exe" # Path to Fiji executable[cite: 1]
+APP_PATH = r"C:\Users\User\Desktop\Fiji\fiji-windows-x64.exe" # Path to Fiji executable
 ```
 ---
 
@@ -162,21 +150,23 @@ APP_PATH = r"C:\Users\User\Desktop\Fiji\fiji-windows-x64.exe" # Path to Fiji exe
 
 ### 1. Start the Background Crawler
 
-Run `nas_indexer.py` in the background (or configure it as a Windows Scheduled Task on login):
+The `nas_indexer.py` has been configured to run automatically in the background upon login on the SupportPC.
+
+Otherwise, manually run `nas_indexer.py` in the background::
 
 ```powershell
 python C:\BioEM_Pipeline\nas_indexer.py
 ```
 
-This service periodically crawls `I:/Maps` and maintains `%APPDATA%\fiji_latest_cache.json`[cite: 1].
+This service periodically crawls `I:/Maps` and maintains `%APPDATA%\fiji_latest_cache.json`.
 
 ### 2. Launch the Application
 
-Double-click `pull_from_NAS.exe` (or run `python app/pull_from_NAS.py`)[cite: 1]:
+Double-click `pull_from_NAS.exe` (or run `python app/pull_from_NAS.py`):
 
-Find your acquisition under **Available on NAS** (or **All Available Data**)[cite: 1].
-Click the dataset button to begin the delta sync to the local SSD[cite: 1].
-When the progress bar completes, Fiji alerts automatically[cite: 1]:
+Find your acquisition under **Available on NAS** (or **All Available Data**).
+Click the dataset button to begin the delta sync to the local SSD.
+When the progress bar completes, Fiji alerts automatically:
 * **Single-Tile Z-Stacks:** Opened directly as an inverted image sequence.
 
 * **2D Mosaics & Mosaic Z-Stacks:** Dispatched to `BioEM_Mosaic.py` for headless 2D montaging, inter-layer rigid registration, and seam blending.
