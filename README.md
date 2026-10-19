@@ -45,11 +45,10 @@ flowchart TD
     style SSD fill:#e8f5e9,stroke:#388e3c,stroke-width:2px
     style XML fill:#fff3e0,stroke:#f57c00,stroke-width:2px
 ```
----
 
 ## Core Features & Active Modules
-
-### 1. Image Ingestion & Desktop Sync Manager (`BioEM Preview` or `pull_from_NAS.py`)
+---
+### 1. Image Ingestion & Desktop Sync Manager (`BioEM_Preview.exe` or `pull_from_NAS.py`)
 
 **Live Discovery:** Displays acquisitions detected within the last 14 days and or the last 21 acquisition (whichever is larger) and catalogs older sessions under a separate **All Available Data** panel.  
 **Smart Delta Synchronization:** Compares file sizes and modification timestamps using (`st_mtime`) between NAS and SSD. Skips untouched frames and copies only new or updated `.tif` files.  
@@ -87,13 +86,12 @@ Extract the ZIP file and place the individual assets into their designated locat
 
 | File from ZIP | Destination Target | Description |
 | :--- | :--- | :--- |
-| `pull_from_NAS.exe` | `Desktop` or `C:\BioEM_Pipeline\` | The standalone GUI application |
-| `nas_indexer.py` | `C:\BioEM_Pipeline\nas_indexer.py` | Headless background scanner daemon |
+| `BioEM_Preview.exe` | `Desktop` as a shortcut | The standalone GUI application |
+| `nas_indexer.py` | `D:\BioEM Sync Tool\nas_indexer.py` | Headless background scanner daemon |
 | `BioEM_Watcher.ijm` | `<Fiji_Path>\macros\AutoRun\BioEM_Watcher.ijm` | Polling macro (runs on Fiji startup) |
 | `BioEM_Mosaic.py` | `<Fiji_Path>\macros\BioEM_Mosaic.py` | Headless TrakEM2 alignment script |
 
-> **Note on Fiji Macro Deployment:** If the `<Fiji_Path>\macros\AutoRun\` folder does not exist, create it manually. Any `.ijm` script placed inside `AutoRun` executes automatically whenever Fiji launches.
----
+> **Note on Fiji Macro Deployment:** If the `<Fiji_Path>\macros\AutoRun\` folder does not exist, create it manually. Any `.ijm` script placed inside `AutoRun` executes automatically whenever Fiji launches. Currently, the active FIJI instance is placed on the desktop `C:\Users\User\Desktop\Fiji`
 
 ### Method B: Building `pull_from_NAS.exe` from Source
 
@@ -110,7 +108,7 @@ cd C:\BioEM_Pipeline
 #### 2. Set Up Python Environment & Dependencies
 
 ```bash
-# Recommended: Python 3.10 virtual environment
+# Recommended: virtual environment created with Python 3.10 or above
 python -m venv venv
 .\venv\Scripts\activate
 
@@ -144,29 +142,28 @@ NAS_DIR = "I:/" # Mapped NAS drive
 
 APP_PATH = r"C:\Users\User\Desktop\Fiji\fiji-windows-x64.exe" # Path to Fiji executable
 ```
----
 
 ## Usage Guide
-
+---
 ### 1. Start the Background Crawler
 
-The `nas_indexer.py` has been configured to run automatically in the background upon login on the SupportPC.
+The `nas_indexer.py` has been configured to run automatically in the background upon login on the SupportPC using Task Scheduler.
 
 Otherwise, manually run `nas_indexer.py` in the background::
 
 ```powershell
-python C:\BioEM_Pipeline\nas_indexer.py
+python "D:\BioEM Sync Tool\nas_indexer.py"
 ```
 
-This service periodically crawls `I:/Maps` and maintains `%APPDATA%\fiji_latest_cache.json`.
+This service periodically crawls `I:/Maps` and maintains cached metadata under `%APPDATA%\fiji_latest_cache.json`.
 
 ### 2. Launch the Application
 
-Double-click `pull_from_NAS.exe` (or run `python app/pull_from_NAS.py`):
+Double-click `BioEM_Preview.exe` (or run `python pull_from_NAS.py`):
 
-Find your acquisition under **Available on NAS** (or **All Available Data**).
-Click the dataset button to begin the delta sync to the local SSD.
-When the progress bar completes, Fiji alerts automatically:
+1. Find your acquisition under **Available on NAS** (or **All Available Data**).
+2. Click the dataset button to begin the delta sync to the local SSD.
+3. When the progress bar completes, Fiji alerts automatically:
 * **Single-Tile Z-Stacks:** Opened directly as an inverted image sequence.
 
 * **2D Mosaics & Mosaic Z-Stacks:** Dispatched to `BioEM_Mosaic.py` for headless 2D montaging, inter-layer rigid registration, and seam blending.
@@ -174,13 +171,13 @@ When the progress bar completes, Fiji alerts automatically:
 4. The final, aligned TrakEM2 project workspace is saved to `C:\Users\<User>\Desktop\<ProjectName>\<ProjectName>.xml`.
 
 ## Roadmap
-
+---
 This deployment architecture is tailored for the current Fiji/TrakEM2 processing model. Future releases will introduce the following extensions:
-**GPU-Accelerated Processing Engine (`bioem_proc.py`):** Standalone headless alignment pipeline built on PyTorch and CUDA for sub-pixel Fourier phase correlation, offloading computation directly to dual NVIDIA RTX GPUs.
-**OME-Zarr Streaming Integration:** Direct compilation of synchronized acquisitions into chunked, pyramidal OME-Zarr array structures on NVMe storage, bypassing RAM limits during multi-slice processing.
+**GPU-Accelerated Processing Engine (`bioem_proc.py`):** Standalone headless alignment pipeline built on PyTorch and CUDA for sub-pixel Fourier phase correlation, offloading computation directly to the dual NVIDIA RTX GPUs (A4000 on the SupportPC).
+**OME-Zarr Streaming Integration:** Direct compilation of synchronized acquisitions into chunked, pyramidal OME-Zarr array structures on NVMe storage, bypassing RAM limits during multi-slice processing (considering implementation using the webknossos CLI for compatibility).
 **Napari Interactive Volume Viewer (`view_in_napari.py`):** Immediate out-of-core inspection interface launched via a dedicated right-click action (**"Show Me the Future"**) for interactive review alongside TrakEM2 projects.
 **Unified Standalone Installer:** Packaging of the Python host, GPU runtime, and viewer components into a streamlined installation wizard.
 
 ## License
-
+---
 This project is developed for use internally at BioEM-EPFL to facilitate imaging operations and automated pipelines. Distributed under the MIT License.
