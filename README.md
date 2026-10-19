@@ -19,27 +19,30 @@ Generates fully configured, aligned TrakEM2 XML project workspaces ready for imm
 ```mermaid
 flowchart TD
     subgraph Storage [" 1. Image Ingestion & Caching "]
-        EM["Microscope Acquisition"] --> NAS[("Network Storage<br/>(I:/Maps)")]
+        EM["MAPS Acquisition / Project"] --> NAS[("Network Storage<br/>(I:/Maps)")]
         NAS -->|"Delta Sync"| SSD[("Local NVMe Storage<br/>(D:/)")]
         Indexer["nas_indexer.py<br/>(Background Crawler)"] -->|"Update Metadata"| Cache[("%APPDATA%/<br/>fiji_latest_cache.json")]
         Cache -.->|"Poll Index"| UI["BioEM-Preview.exe<br/>(GUI)"]
     end
 
     subgraph Automation [" 2. Automation Bridge "]
-        UI -->|"Write Token"| Trig["D:/fiji_trigger.txt"]
-        Trig -->|"AutoRun Poll"| Watcher["BioEM_Watcher.ijm"]
-        Watcher --> Script["BioEM_Mosaic.py"]
+        Trig["D:/fiji_trigger.txt"] -->|"AutoRun Poll"| Watcher["BioEM_Watcher.ijm"]
     end
 
     subgraph Processing [" 3. Headless TrakEM2 Engine "]
-        Script --> P1["Pass 1: Intra-Layer 2D Montaging<br/>(AlignTask.montageLayers)"]
-        P1 --> P2["Pass 2: Inter-Layer Z-Alignment<br/>(Align.alignTileCollections via RigidTile2D)"]
-        P2 --> P3["Pass 3: XML State Serialization<br/>(Snapshots purged)"]
+        Script["BioEM_Mosaic.py"] --> P1["Pass 1: Intra-Layer 2D Montaging<br/>(AlignTask.montageLayers)"]
+        P1 --> P2["Pass 2: Consecutive Inter-Layer Z-Alignment<br/>(Align.alignTileCollections via RigidTile2D)"]
+        P2 --> P3["Pass 3: State Export & Memory Cleanup<br/>(Purge undo snapshots)"]
     end
 
     subgraph Output [" 4. TrakEM Project Workspace "]
-        P3 --> XML[("Desktop/&lt;Project&gt;/&lt;Project&gt;.xml<br/>(Aligned TrakEM2 Workspace)")]
+        XML[("Desktop/&lt;ProjectName&gt;/&lt;ProjectName&gt;.xml<br/>(Aligned TrakEM2 Workspace)")]
     end
+
+    %% Inter-stage connections targeting the containers directly
+    UI -->|"Write Token"| Automation
+    Watcher -->|"Executes"| Processing
+    Processing --> Output
 
     style NAS fill:#e1f5fe,stroke:#0288d1,stroke-width:2px
     style SSD fill:#e8f5e9,stroke:#388e3c,stroke-width:2px
