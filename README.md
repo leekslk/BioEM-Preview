@@ -18,9 +18,17 @@ Generates fully configured, aligned TrakEM2 XML project workspaces ready for imm
 ---
 ```mermaid
 flowchart TD
-    %% Top Level Container forcing Stage 1 and Stage 2 to share a bottom baseline
+    %% Top Row Container holding Stage 2 on the left and Stage 1 on the right
     subgraph TopRow [" "]
         direction LR
+
+        subgraph Stage2 [" 2. Automation Bridge "]
+            direction TB
+            Trig["D:/fiji_trigger.txt<br/>(Handoff Token)"]
+            Watcher["BioEM_Watcher.ijm<br/>(AutoRun Poller)"]
+
+            Trig -->|"AutoRun Poll"| Watcher
+        end
 
         subgraph Stage1 [" 1. Image Ingestion & Caching "]
             direction LR
@@ -45,21 +53,16 @@ flowchart TD
                 NAS -->|"Delta Sync"| SSD
             end
 
-            %% Symmetric Cross-Links across the two columns
+            %% Explicit rank constraints: lock sub-boxes to identical vertical levels
+            Indexer ~~~ EM
             Indexer -.->|"Scans"| NAS
-            UI -.->|"Controls"| SSD
+            Cache ~~~ NAS
+            UI -.-|"Controls"| SSD
         end
 
-        subgraph Stage2 [" 2. Automation Bridge "]
-            direction TB
-            Trig["D:/fiji_trigger.txt<br/>(Handoff Token)"]
-            Watcher["BioEM_Watcher.ijm<br/>(AutoRun Poller)"]
-
-            Trig -->|"AutoRun Poll"| Watcher
-        end
-
-        %% Connection from UI directly into the center of Stage 2
+        %% Link UI to Stage 2 and lock Stage 2's bottom to Stage 1's bottom
         UI -->|"Write Token"| Trig
+        Watcher ~~~ UI
     end
 
     %% Middle Engine Stage
@@ -87,7 +90,7 @@ flowchart TD
     P1 -.->|"Output"| WF2
     P3 -.->|"Output"| WF3
 
-    %% Styling & Theme Alignment
+    %% Styling
     style TopRow fill:none,stroke:none
     style Stage1 fill:#1a1a1a,stroke:#666,stroke-width:1px
     style Stage2 fill:#242424,stroke:#0288d1,stroke-width:2px
