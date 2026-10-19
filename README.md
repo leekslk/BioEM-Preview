@@ -2,10 +2,8 @@
 
 An automated acquisition ingestion, synchronization, and volumetric registration framework designed for large-scale Electron Microscopy (EM) datasets, supporting Single-Tile Z-Stacks, 2D Mosaics, and Multi-Layer Mosaic Z-Stacks (work-in-progress).
 
----
-
 ## Overview
-
+---
 SBF-SEM produces large image streams across 2D spatial tiles and serial sections. With multiple possible workflows based on user's intent and project's requirements. Manually moving these datasets across the local network and configuring alignment parameters inside FIJI is time-consuming and prone to human error.
 
 The **BioEM Preview** automates the entire transit and assembly lifecycle:
@@ -16,10 +14,8 @@ Signals Fiji to execute a multi-pass hierarchical registration (intra-slice 2D s
 Normalizes seam intensities across overlapping tiles per layer.
 Generates fully configured, aligned TrakEM2 XML project workspaces ready for immediate visual review or downstream segmentation.
 
----
-
 ## System Architecture
-
+---
 ```mermaid
 flowchart TD
     subgraph Storage [" 1. Ingestion & Caching "]
@@ -64,26 +60,21 @@ flowchart TD
 ### 2. Context Menu & Dataset Operations
 
 Right-clicking any dataset entry in the UI provides:
-
 **Refresh Folder (Wipe & Sync):** Displays a safety confirmation dialog, deletes the local dataset directory on `D:/`, and executes a fresh synchronization from the NAS source[cite: 1].
 **Delete Existing Data:** Displays a confirmation prompt showing the target dataset name and permanently purges the local folder from `D:/`.
 
 ### 3. Headless TrakEM2 Assembly Engine (`BioEM_Mosaic.py`)
-
-**Two-Pass Hierarchical Registration:**
-**Pass 1 (Intra-Layer 2D Montaging):** Stitches tiles belonging to the same physical cut independently using rigid transforms (`AlignTask.montageLayers`), locking internal slice geometry.
-**Pass 2 (Inter-Layer Z-Alignment):** Bypasses TrakEM2 modal dialogs (`GenericDialog`) by programmatically wrapping image patches into mathematical `RigidTile2D` models and invoking `Align.alignTileCollections` sequentially along the Z-axis, pinning Layer 0 as the reference anchor.
-**Per-Layer Seam Blending:** Isolates each physical layer and executes `Blending.blendPatches` to normalize electron-beam intensity variations across boundaries without triggering multi-layer coordinate mismatch errors.
-**Compact String Safe Persistence:** Implements resilient serialization routines to prevent JVM compact string bugs (`ClassCastException: [B cannot be cast to [C`) when saving project XML files on Java 9+ runtimes.
----
+* **Two-Pass Hierarchical Registration:**
+  * **Pass 1 (Intra-Layer 2D Montaging):** Stitches tiles belonging to the same physical cut independently using rigid transforms (`AlignTask.montageLayers`), locking internal slice geometry.
+  * **Pass 2 (Inter-Layer Z-Alignment):** Bypasses TrakEM2 modal dialogs (`GenericDialog`) by programmatically wrapping image patches into mathematical `RigidTile2D` models and invoking `Align.alignTileCollections` consecutively along the Z-axis, pinning Layer 0 as the reference anchor.
+* **Compact String Safe Persistence:** Implements resilient serialization routines that purge JVM undo snapshots before XML export, preventing modern Java compact string crashes (`ClassCastException: [B cannot be cast to [C`).
 
 ## Hardware & Software Requirements
 
-**Operating System:** Windows 10/11 Pro (x64)
-**Storage:** Local NVMe SSD dedicated to caching (`D:/`)[cite: 1] and mapped high-throughput NAS storage (`I:/`)[cite: 1]
-**Fiji:** Fiji (ImageJ 1.54+) bundled with TrakEM2 and Python/Jython 2.7 scripting support[cite: 1]
-**Host Python Environment:** Python 3.10+ (for building the `.exe` or running source scripts)
----
+* **Operating System:** Windows 10/11 Pro (x64)
+* **Storage:** Local NVMe SSD dedicated to caching (`D:/`) and mapped high-throughput NAS storage (`I:/`)
+* **Fiji:** Fiji (ImageJ 1.54+) bundled with TrakEM2 and Python/Jython 2.7 scripting support
+* **Host Python Environment:** Python 3.10+ (for building the `.exe` or running source scripts)
 
 ## Installation & Deployment
 
@@ -145,7 +136,6 @@ pip install customtkinter psutil pyinstaller
 Run PyInstaller directly from the repository root, ensuring the icon asset is bundled so `sys._MEIPASS` can extract it at runtime[cite: 1]:
 
 ```powershell
-
 pyinstaller --noconsole `
 
 --onefile `
@@ -157,7 +147,6 @@ pyinstaller --noconsole `
 --name "pull_from_NAS" `
 
 app/pull_from_NAS.py
-
 ```
 
 The compiled binary will be generated in `dist\pull_from_NAS.exe`.
@@ -167,13 +156,11 @@ The compiled binary will be generated in `dist\pull_from_NAS.exe`.
 If your workstation uses different drive letters or Fiji directories, adjust the constants near the top of `app/pull_from_NAS.py` before compiling[cite: 1]:
 
 ```python
-
 DESTINATION_DIR = "D:/" # Local SSD target cache[cite: 1]
 
 NAS_DIR = "I:/" # Mapped NAS drive[cite: 1]
 
 APP_PATH = r"C:\Users\User\Desktop\Fiji\fiji-windows-x64.exe" # Path to Fiji executable[cite: 1]
-
 ```
 ---
 
@@ -184,9 +171,7 @@ APP_PATH = r"C:\Users\User\Desktop\Fiji\fiji-windows-x64.exe" # Path to Fiji exe
 Run `nas_indexer.py` in the background (or configure it as a Windows Scheduled Task on login):
 
 ```powershell
-
 python C:\BioEM_Pipeline\nas_indexer.py
-
 ```
 
 This service periodically crawls `I:/Maps` and maintains `%APPDATA%\fiji_latest_cache.json`[cite: 1].
@@ -203,17 +188,14 @@ When the progress bar completes, Fiji alerts automatically[cite: 1]:
 * **2D Mosaics & Mosaic Z-Stacks:** Dispatched to `BioEM_Mosaic.py` for headless 2D montaging, inter-layer rigid registration, and seam blending.
 
 4. The final, aligned TrakEM2 project workspace is saved to `C:\Users\<User>\Desktop\<ProjectName>\<ProjectName>.xml`.
----
 
 ## Roadmap
 
 This deployment architecture is tailored for the current Fiji/TrakEM2 processing model. Future releases will introduce the following extensions:
-
 **GPU-Accelerated Processing Engine (`bioem_proc.py`):** Standalone headless alignment pipeline built on PyTorch and CUDA for sub-pixel Fourier phase correlation, offloading computation directly to dual NVIDIA RTX GPUs.
 **OME-Zarr Streaming Integration:** Direct compilation of synchronized acquisitions into chunked, pyramidal OME-Zarr array structures on NVMe storage, bypassing RAM limits during multi-slice processing.
 **Napari Interactive Volume Viewer (`view_in_napari.py`):** Immediate out-of-core inspection interface launched via a dedicated right-click action (**"Show Me the Future"**) for interactive review alongside TrakEM2 projects.
 **Unified Standalone Installer:** Packaging of the Python host, GPU runtime, and viewer components into a streamlined installation wizard.
----
 
 ## License
 
