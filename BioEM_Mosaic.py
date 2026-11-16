@@ -1,12 +1,15 @@
 import os
 import sys
 import re
+import math
 from java.io import File
-from java.awt.geom import AffineTransform
+from java.awt.geom import AffineTransform, Point2D # default transformation used strictly to place tiles in rough coordinates
+from java.util import ArrayList, HashSet
+from java.lang import System
+from java.awt import GraphicsEnvironment
 from ij import IJ
 from ini.trakem2 import Project
 from ini.trakem2.display import Display, Patch, Layer
-from java.util import HashSet
 from ini.trakem2.imaging import Blending
 from mpicbg.trakem2.align import Align, AlignTask, RigidTile2D, TranslationTile2D
 from mpicbg.models import RigidModel2D, TranslationModel2D
@@ -75,9 +78,9 @@ sorted_z_levels = sorted(tiles_by_z.keys())
 print("Found " + str(len(sorted_z_levels)) + " Z-slice(s) to process.")
 
 # (3) Compute offset using tile dimensions?
-imp = IJ.openImage(first_image_path)
-tile_w = imp.getWidth()
-tile_h = imp.getHeight()
+imp = IJ.openImage(first_image_path) #this is IO-heavy, change to a hybrid-approach in the next iteration
+tile_w = imp.getWidth() # could use a single patch as we don't image multiple "sizes"
+tile_h = imp.getHeight() # the first image is representative to all the data (presumably)
 imp.close()
 
 # 10% nominal overlap
@@ -85,7 +88,8 @@ step_x = tile_w * 0.90
 step_y = tile_h * 0.90
 
 # (4) Initialize TrakEM2 Project & Populate Layers
-project = Project.newFSProject("blank", None, desktop_dir, True)
+# set GUI display to false during initialization (prevents premature GUI window & mid-alignment repaints):
+project = Project.newFSProject("blank", None, desktop_dir, False)
 layerset = project.getRootLayerSet()
 
 all_layers = ArrayList()
@@ -100,6 +104,7 @@ for layer_idx, z in enumerate(sorted_z_levels):
             layer = layerset.getLayer(float(layer_idx), 1.0, True)
         except Exception:
             layer = Layer(project, float(layer_idx), 1.0, layerset)
+            layerset.add(layer)  # Register in layerset so layerset.getLayers() includes it
             
     all_layers.add(layer)
     
@@ -120,97 +125,214 @@ for layer_idx, z in enumerate(sorted_z_levels):
 
 print("Placed " + str(len(all_patches)) + " tiles across " + str(all_layers.size()) + " layer(s).")
 
+# Retrieve Layers from the Active Project
+layerset = project.getRootLayerSet()
+all_layers = layerset.getLayers()
 
-# (5) 1st Pass: Intra-Layer 2D Montaging (Per-Slice Alignment)
-print("Pass 1: Solving intra-layer 2D tile alignment...")
+if all_layers.isEmpty():
+    sys.exit("Error: 0 layers found in project after ingestion.")
+
+def fit_rigid_2d_procrustes(P_pts, Q_pts, outlier_thresh_px=25.0):
+    """
+    Fits a single 2D rigid transform (rotation + translation) mapping P_pts -> Q_pts
+    via centroid-centered Kabsch/Procrustes SVD, with median-displacement outlier rejection.
+    Returns an AffineTransform in world coordinates, or None if no valid pairs exist.
+    """
+    n = len(P_pts)
+    if n == 0:
+        return None
+
+    # (1) Outlier rejection via median displacement vector (when >= 3 tiles matched)
+    if n >= 3:
+        dxs = sorted([Q_pts[i][0] - P_pts[i][0] for i in range(n)])
+        dys = sorted([Q_pts[i][1] - P_pts[i][1] for i in range(n)])
+        med_dx = dxs[n // 2]
+        med_dy = dys[n // 2]
+
+        inlier_P, inlier_Q = [], []
+        for i in range(n):
+            err_x = (Q_pts[i][0] - P_pts[i][0]) - med_dx
+            err_y = (Q_pts[i][1] - P_pts[i][1]) - med_dy
+            if math.hypot(err_x, err_y) <= outlier_thresh_px:
+                inlier_P.append(P_pts[i])
+                inlier_Q.append(Q_pts[i])
+
+        if len(inlier_P) >= 1:
+            P_pts, Q_pts = inlier_P, inlier_Q
+            n = len(P_pts)
+
+    # (2) Compute centroids P_bar and Q_bar (eliminates (0, 0) lever-arm bias)
+    px_mean = sum(p[0] for p in P_pts) / float(n)
+    py_mean = sum(p[1] for p in P_pts) / float(n)
+    qx_mean = sum(q[0] for q in Q_pts) / float(n)
+    qy_mean = sum(q[1] for q in Q_pts) / float(n)
+
+    # (3) Closed-form 2D Procrustes optimal rotation angle theta around centroids
+    # If n == 1, num = den = 0 -> atan2(0, 0) = 0.0 (pure translation fallback)
+    num = 0.0
+    den = 0.0
+    for i in range(n):
+        ux = P_pts[i][0] - px_mean
+        uy = P_pts[i][1] - py_mean
+        vx = Q_pts[i][0] - qx_mean
+        vy = Q_pts[i][1] - qy_mean
+        num += (ux * vy - uy * vx)
+        den += (ux * vx + uy * vy)
+
+    theta = math.atan2(num, den)
+    cos_t = math.cos(theta)
+    sin_t = math.sin(theta)
+
+    # (4) World-space translation: t = Q_bar - R * P_bar
+    tx = qx_mean - (cos_t * px_mean - sin_t * py_mean)
+    ty = qy_mean - (sin_t * px_mean + cos_t * py_mean)
+
+    # AffineTransform(m00, m10, m01, m11, m02, m12)
+    return AffineTransform(cos_t, sin_t, -sin_t, cos_t, tx, ty), theta, (qx_mean - px_mean), (qy_mean - py_mean), n
+    # might be an over-kill but let's see if this works
+#
+# PASS 1: Stitch spatial tiles first
+#
+print("Pass 1: Montaging intra-layer spatial tiles (Rigid + Regularized)...")
+
 intra_params = Align.ParamOptimize()
 intra_params.sift.minOctaveSize = 64
 intra_params.sift.maxOctaveSize = 1024
+intra_params.expectedModelIndex = 0        # Baseline: Translation
+intra_params.desiredModelIndex = 1         # Solved: Rigid (fixes slight stage rotation)
+intra_params.regularizerModelIndex = 0     # Regularize toward Translation
+intra_params.regularize = True
+setattr(intra_params, 'lambda', 0.1)
+intra_params.minNumInliers = 10
 
-# DEFAULT: Rigid-only
-intra_params.desiredModelIndex = 1
-# intra_params.desiredModelIndex = 0 # Uncomment for pure Translation-only
+future = AlignTask.montageLayers(intra_params, all_layers, False, False, False, False)
+if future is not None:
+    future.get()
 
-# Stitches each slice independently
-AlignTask.montageLayers(intra_params, all_layers, False, False, False, False)
+layerset.setMinimumDimensions()
+print("Pass 1: 2D Montaging completed.")
 
-# (6) 2nd Pass: Consecutive Pairwise Inter-Layer Z-Alignment (Rigid)
-if len(sorted_z_levels) > 1:
-    print("Pass 2: Aligning layers sequentially across Z (Rigid)...")
-    
-    p = Align.Param()
-    p.sift.minOctaveSize = 64
-    p.sift.maxOctaveSize = 1024
-    
-    # Rigid: Corrects translation drift and rotation between consecutive cuts
-    p.expectedModelIndex = 1
-    p.desiredModelIndex = 1
-    p.regularize = False
-    p.minNumInliers = 8  # Stable threshold for adjacent serial sections
+#
+# PASS 2: Sequential Layer-as-Rigid-Unit Z-Alignment
+#
+if all_layers.size() > 1:
+    print("Pass 2: Aligning layers sequentially across Z (Layer-as-Rigid-Unit)...")
 
-    # Strictly pairwise: Compare slice i ONLY to slice i-1
+    z_param = Align.Param()
+    z_param.sift.minOctaveSize = 64
+    z_param.sift.maxOctaveSize = 1024
+    z_param.expectedModelIndex = 0        # Baseline: Translation
+    z_param.desiredModelIndex = 1         # Solved: Rigid
+    z_param.regularizerModelIndex = 0     # Regularize toward Translation
+    z_param.regularize = True
+    setattr(z_param, 'lambda', 0.1)
+    z_param.minNumInliers = 8
+
     for i in range(1, all_layers.size()):
         ref_layer = all_layers.get(i - 1)
         mov_layer = all_layers.get(i)
-        
-        # Reference pool: ONLY the immediate previous layer
-        ref_tiles = ArrayList()
-        for patch in ref_layer.getDisplayables(Patch):
-            ref_tiles.add(RigidTile2D(patch))
-            
-        # Moving pool: The current layer to align
-        mov_tiles = ArrayList()
-        for patch in mov_layer.getDisplayables(Patch):
-            mov_tiles.add(RigidTile2D(patch))
-            
-        print("Aligning Layer " + str(i) + " to Layer " + str(i - 1) + "...")
+
+        ref_patches = ref_layer.getDisplayables(Patch)
+        mov_patches = mov_layer.getDisplayables(Patch)
+
+        # 1. Snapshot exact 2D montaged transforms before Z-alignment
+        pre_transforms = [AffineTransform(p.getAffineTransform()) for p in mov_patches]
+
+        ref_tiles = ArrayList([RigidTile2D(p) for p in ref_patches])
+        mov_tiles = ArrayList([RigidTile2D(p) for p in mov_patches])
+
         try:
-            Align.alignTileCollections(p, ref_tiles, mov_tiles)
-        except Exception as err:
-            print("Notice: Layer " + str(i) + " pair alignment fallback: " + str(err))
-            
-    print("Layer alignment complete.")
+            Align.alignTileCollections(z_param, ref_tiles, mov_tiles)
 
-# (7) 3rd Pass: Contrast Homogenization
-# removed contrast homogenization as I am uncertain how it is running/working rigth now.
-print("Pass 3: Contrast homogenization skipped.")
+            # 2. Extract tile-center correspondences P_i -> Q_i from RigidTile2D models
+            P_pts = []
+            Q_pts = []
+            for idx, p in enumerate(mov_patches):
+                pre_at = pre_transforms[idx]
+                # Read solved transform directly from the tile's model
+                post_at = mov_tiles.get(idx).createAffine()
 
-# (8) Refresh View & Persist XML
-display = Display.getFront(project)
-if display:
-    display.update(layerset.getLayers().get(0))
-    display.getCanvas().repaint()
+                # Check if this tile actually matched/moved relative to pre_at
+                m_pre = [0.0] * 6
+                m_post = [0.0] * 6
+                pre_at.getMatrix(m_pre)
+                post_at.getMatrix(m_post)
+                max_diff = max(abs(m_post[k] - m_pre[k]) for k in range(6))
 
-# Purge undo snapshots to prevent Java 21 compact string crash ([B cannot be cast to [C)
-try:
-    f_set = layerset.getClass().getDeclaredField("snapshots")
-    f_set.setAccessible(True)
-    sn_set = f_set.get(layerset)
-    if sn_set is not None:
-        sn_set.clear()
-        f_set.set(layerset, None)
-except Exception:
-    pass
+                if max_diff > 1e-6:
+                    cx = float(p.getOWidth()) / 2.0
+                    cy = float(p.getOHeight()) / 2.0
 
-for lyr in layerset.getLayers():
-    try:
-        f_lyr = lyr.getClass().getDeclaredField("snapshots")
-        f_lyr.setAccessible(True)
-        sn_lyr = f_lyr.get(lyr)
-        if sn_lyr is not None:
-            sn_lyr.clear()
-            f_lyr.set(lyr, None)
-    except Exception:
-        pass
+                    pt_pre = Point2D.Double(cx, cy)
+                    pt_post = Point2D.Double(cx, cy)
+                    pre_at.transform(pt_pre, pt_pre)
+                    post_at.transform(pt_post, pt_post)
 
+                    P_pts.append((pt_pre.getX(), pt_pre.getY()))
+                    Q_pts.append((pt_post.getX(), pt_post.getY()))
+
+            # 3. Fit single centroid-centered rigid transform across all matched tile centers
+            fit_result = fit_rigid_2d_procrustes(P_pts, Q_pts, outlier_thresh_px=25.0)
+
+            if fit_result is not None:
+                slice_at, theta, cent_dx, cent_dy, used_tiles = fit_result
+
+                for idx, p in enumerate(mov_patches):
+                    locked_at = AffineTransform(pre_transforms[idx])
+                    locked_at.preConcatenate(slice_at)
+                    p.setAffineTransform(locked_at)
+                    p.updateBucket()
+
+                print("  Layer %d -> %d locked rigid shift (%d/%d tiles): dx=%.1f, dy=%.1f, rot=%.3f deg" % (
+                    i, i - 1, used_tiles, mov_patches.size(), cent_dx, cent_dy, math.degrees(theta)))
+            else:
+                for idx, p in enumerate(mov_patches):
+                    p.setAffineTransform(pre_transforms[idx])
+                    p.updateBucket()
+                print("  Notice: No cross-layer consensus on Layer %d; preserving 2D montage." % i)
+                
+        except Exception as z_err:
+            for idx, p in enumerate(mov_patches):
+                p.setAffineTransform(pre_transforms[idx])
+                p.updateBucket()
+            print("  Notice: Layer %d Z-align fallback: %s" % (i, str(z_err)))
+
+    # Normalize global canvas origin and rebuild all spatial index buckets
+    layerset.setMinimumDimensions()
+    layerset.recreateBuckets(True)
+    print("Pass 2: Layer-as-Rigid-Unit Z-alignment completed.")
+
+#
+# PASS 3: Patch Homogenisation (Per-Layer), with-holding function for user choice or optimisation later
+#
+print("The Current Workflow Will NOT BE Homogenising Patches...")
+# modfies pixel intensity vlaues, creates sharp 1-pixel boundaries, matching B&C across tiles, no ghosting
+#for layer in all_layers:
+#    patches = layer.getDisplayables(Patch)
+#    if patches.size() > 1:
+#        try:
+#            AlignTask.homogenizePatches(patches)
+#        except Exception as homog_err:
+#            print("Notice: Homogenisation fallback on Z=" + str(layer.getZ()) + ": " + str(homog_err))
+#
+#print("Pass 3: Patch Homogenisation completed.")
+
+# Project Persistence & Safe Save
 print("Saving TrakEM2 project...")
 try:
     project.saveAs(xml_path, True)
     print("--- BioEM Pipeline Finished Successfully: " + xml_path + " ---")
-except Exception as e:
-    print("Standard save notice: " + str(e))
-    try:
-        project.save()
-        print("--- BioEM Pipeline Finished Successfully (via save) ---")
-    except Exception as err:
-        print("CRITICAL: Failed to save project XML: " + str(err))
+    
+    if not GraphicsEnvironment.isHeadless():
+        front_disp = Display.getFront(project)
+        if front_disp is None:
+            Display(project, all_layers.get(0))
+        else:
+            front_disp.setLayer(all_layers.get(0))
+            Display.update(layerset)
+    else:
+        # Headless mode: free cached patch rasters from JVM heap
+        project.getLoader().releaseAll()
+        System.gc()
+except Exception as save_err:
+    print("Error saving project: " + str(save_err))
