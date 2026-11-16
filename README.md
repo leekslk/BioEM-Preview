@@ -1,20 +1,22 @@
 # BioEM Preview: Smart Sync & Headless Multi-Layer Alignment
 
-An automated acquisition ingestion, synchronization, and volumetric registration framework designed for Serial Block face Scanning Electron Microscopy (SBF-SEM) datasets, supporting Single-Tile Z-Stacks, 2D Mosaics, and Multi-Layer Mosaic Z-Stacks derived from MAPS.
+An applet that performs automated acquisition ingestion, synchronization, and volumetric registration framework designed for datasets acquired from MAPS (ThermoFisher), currently supports Single-Tile Z-Stack, 2D Mosaic, and Multi-Layer Mosaic Z-Stack.
 
 ## Overview
 ---
-SBF-SEM produces large image streams across 2D spatial tiles and serial sections. With multiple possible workflows based on user's intent and project's requirements. Manually moving these datasets across the local network and configuring alignment parameters inside FIJI is time-consuming and prone to human error.
+SBF-SEM produces large image streams across 2D spatial tiles and serial sections. There are multiple possible workflows, depending on the user's intent and the project's requirements. Moving these datasets manually across the local network and configuring the alignment parameters in FIJI is time-consuming and prone to errors.
 
-The **BioEM Preview** automates the entire image import and stack alignment or assembly lifecycle:
+The **BioEM Preview** automates the entire image import and stack alignment or file-assembly lifecycle:
 * Detects and categorizes incoming acquisitions in near real-time from the network storage (NAS).
 * Performs "fast", time/delta-synchronised transfer to the local high-speed NVMe storage.
 * Signals Fiji to execute a multi-pass hierarchical registration (intra-slice 2D stitching followed by inter-slice Z-alignment, as necessary).
 * Generates fully configured, aligned TrakEM2 XML project workspaces ready for immediate visual review or downstream segmentation.
 
-Too Long Didn't Read | TLDR: 
-The app runs on the SupportPC and constantly scans for new acquisitions from MAPS.  Automatically detects acquisitions that falls broadly into 3 categories: Z-stacks, Mosaic (mutiple tiles) and Mosaic Z-stack.  
-Clicking on the Dataset triggers a synchronisation of .tiff files that are pulled from the NAS and copied into a local folder for speedy visualisation in Fiji/imageJ. Mosaic and Mosaic Z-stacks are automatically aligned and presented in TrakEM2 (takes time, corresponding to the size of the acquisition). Some features may require a right-click at the right place.
+*Too Long Didn't Read | TLDR:*
+ * *The app runs on the SupportPC and constantly scans for new acquisitions from MAPS.*  
+ * *Automatically detects acquisitions that falls broadly into 3 categories: Z-stacks, Mosaic (mutiple tiles) and Mosaic Z-stack.*  
+ * *Clicking on the Dataset triggers a synchronisation of .tiff files that are pulled from the NAS and copied into a local folder for speedy visualisation in Fiji/imageJ.*  
+ * *Mosaic and Mosaic Z-stacks are automatically aligned and presented in TrakEM2 (takes time, corresponding to the size of the acquisition). Some features may require a right-click at the right place.*
 
 ## System Architecture
 ---
@@ -24,9 +26,9 @@ Clicking on the Dataset triggers a synchronisation of .tiff files that are pulle
 ---
 ### 1. Image Ingestion & Desktop Sync Manager (`BioEM_Preview.exe` or `pull_from_NAS.py`)
 
-**Live Discovery:** Displays acquisitions detected within the last 14 days and/or the last 21 acquisition (whichever is larger) and catalogs older sessions under a separate **All Available Data** panel.  
-**Smart Delta Synchronization:** Compares file sizes and modification timestamps using (`st_mtime`) between NAS and SSD. Skips untouched frames and copies only new or updated `.tif` files.  
-**Coordinate Pattern Extraction:** Parses tile grid configurations via regular expressions (`Tile_<dim1>-<dim2>-<z>`) to support real-time indexing even while an acquisition is actively running.  
+**Live Discovery:** Displays dataset or acquisitions performed within the last 14 days and/or shows the last 21 acquisitions (whichever is larger) and catalogs older sessions under a separate **All Available Data** panel.  
+**Smart Delta Synchronization:** Compares file sizes and modification timestamps using (`st_mtime`) between NAS and SSD. Skips untouched frames and only copies new or updated `.tif` files.  
+**Coordinate Pattern Extraction:** Parses tile grid configurations via regular expressions (`Tile_<dim1>-<dim2>-<z>`) supporting real-time indexing even when an acquisition is in progress.  
 **Automated Housekeeping:** Background worker prunes cached folders on `D:/` older than 30 days while protecting core directories and root system paths.  
 **Fiji Process Interoperability:** Uses `psutil` to verify whether Fiji is active. If running, it alerts the open instance via a token file (`D:/fiji_trigger.txt`); if closed, it launches a fresh Fiji process with the proper working directory and bundled JRE dependencies.
 
@@ -40,6 +42,7 @@ Right-clicking any dataset entry in the UI provides:
 * **Two-Pass Hierarchical Registration:**
   * **1st Pass (Intra-Layer 2D Montaging):** Stitches tiles belonging to the same section (in Z) using rigid transforms (`AlignTask.montageLayers`), locking internal slice geometry.
   * **2nd Pass (Inter-Layer Z-Alignment):** Bypasses TrakEM2 modal dialogs (`GenericDialog`) by wrapping image patches into `RigidTile2D` models and invoking `Align.alignTileCollections` consecutively along the Z-axis, pinning Layer 0 as the reference anchor.
+  * **Per-Layer Seam Blending:** Iterates through each physical slice independently and executes `Blending.blendPatches` to normalize electron-beam intensity falloff and tile edge seams across spatial overlaps without causing 3D coordinate mismatch errors.
 
 ## Hardware & Software Requirements
 
@@ -146,11 +149,11 @@ Double-click `BioEM_Preview.exe` (or run `python pull_from_NAS.py`):
 
 ## Roadmap
 ---
-This deployment architecture is tailored for the current Fiji/TrakEM2 processing model. Future releases will introduce the following extensions:
-**GPU-Accelerated Processing Engine (`bioem_proc.py`):** Standalone headless alignment pipeline built on PyTorch and CUDA for sub-pixel Fourier phase correlation, offloading computation directly to the dual NVIDIA RTX GPUs (A4000 on the SupportPC).
-**OME-Zarr Streaming Integration:** Direct compilation of synchronized acquisitions into chunked, pyramidal OME-Zarr array structures on NVMe storage, bypassing RAM limits during multi-slice processing (considering implementation using the webknossos CLI for compatibility).
-**Napari Interactive Volume Viewer (`view_in_napari.py`):** Immediate out-of-core inspection interface launched via a dedicated right-click action (**"Show Me the Future"**) for interactive review alongside TrakEM2 projects.
-**Unified Standalone Installer:** Packaging of the Python host, GPU runtime, and viewer components into a streamlined installation wizard.
+This deployment architecture is tailored for the current Fiji/TrakEM2 processing model. Future releases will introduce the following extensions:  
+**GPU-Accelerated Processing Engine (`bioem_proc.py`):** Standalone headless alignment pipeline built on PyTorch and CUDA for sub-pixel Fourier phase correlation, offloading computation directly to the dual NVIDIA RTX GPUs (A4000 on the SupportPC).  
+**OME-Zarr Streaming Integration:** Direct compilation of synchronized acquisitions into chunked, pyramidal OME-Zarr array structures on NVMe storage, bypassing RAM limits during multi-slice processing (considering implementation using the webknossos CLI for compatibility).  
+**Napari Interactive Volume Viewer (`view_in_napari.py`):** Immediate out-of-core inspection interface launched via a dedicated right-click action (**"Show Me the Future"**) for interactive review alongside TrakEM2 projects.  
+**Unified Standalone Installer:** Packaging of the Python host, GPU runtime, and viewer components into a streamlined installation wizard.  
 
 ## License
 ---
