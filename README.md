@@ -24,25 +24,27 @@ The **BioEM Preview** automates the entire image import and stack alignment or f
 
 ## Core Features & Active Modules
 ---
-### 1. Image Ingestion & Desktop Sync Manager (`BioEM_Preview.exe` or `pull_from_NAS.py`)
+### 1. Image Ingestion & Desktop Sync Manager (`Preview_beta-YYYYMMMDD.exe` / `pull_from_NAS.py`)
 
-**Live Discovery:** Displays dataset or acquisitions performed within the last 14 days and/or shows the last 21 acquisitions (whichever is larger) and catalogs older sessions under a separate **All Available Data** panel.  
-**Smart Delta Synchronization:** Compares file sizes and modification timestamps using (`st_mtime`) between NAS and SSD. Skips untouched frames and only copies new or updated `.tif` files.  
+**First-Run Setup & Settings:** On first launch, a Setup Wizard prompts for the local scratch drive (`DESTINATION_DIR`), NAS root (`NAS_DIR`), and Fiji (Java 8) executable (`APP_PATH`) pre-filled with default paths. Saving automatically deploys `BioEM_Watcher.ijm` to Fiji's `macros/AutoRun/` folder and starts the integrated background crawler (`--indexer`).  
+**Live Discovery:** Displays acquisitions performed within the last 14 days (minimum 12 entries) under **Available on NAS**, and catalogs older sessions under **All Available Data**.  
+**Smart Delta Synchronization:** Compares file sizes and modification timestamps (`st_mtime`) between NAS and `<DESTINATION_DIR>/BioEM_Cache/`. Skips untouched frames and only copies new or updated `.tif` files.  
 **Coordinate Pattern Extraction:** Parses tile grid configurations via regular expressions (`Tile_<dim1>-<dim2>-<z>`) supporting real-time indexing even when an acquisition is in progress.  
-**Automated Housekeeping:** Background worker prunes cached folders on `D:/` older than 30 days while protecting core directories and root system paths.  
-**Fiji Process Interoperability:** Uses `psutil` to verify whether Fiji is active. If running, it alerts the open instance via a token file (`D:/fiji_trigger.txt`); if closed, it launches a fresh Fiji process with the proper working directory and bundled JRE dependencies.
+**Automated Housekeeping:** Background worker prunes cached folders inside `<DESTINATION_DIR>/BioEM_Cache/` older than 30 days.  
+**Workflow Routing:**  
+* **Simple Z-Stack:** Syncs to local NVMe cache and triggers Fiji (`BioEM_Watcher.ijm`) to open as a virtual stack (`Image Sequence... sort use`) with inverted LUT.  
+* **2D Mosaic & Mosaic Z-Stack:** Runs `bioem_torch_align.py` directly inside the app with live per-pass progress, elapsed time, and ETA, writes a native TrakEM2 `.xml` project on the Desktop, and opens it in Java 8 Fiji.
 
 ### 2. Context Menu & Dataset Operations
 
-Right-clicking any dataset entry in the UI provides:
-**Refresh Folder (Wipe & Sync):** Displays a safety confirmation dialog, deletes the local dataset directory on `D:/`, and executes a fresh synchronization from the NAS source.
-**Delete Existing Data:** Displays a confirmation prompt showing the target dataset name and permanently purges the local folder from `D:/`.
+Right-clicking any dataset entry in the UI provides:  
+**Refresh Folder (Wipe & Sync):** Displays a safety confirmation dialog, deletes the local cached dataset directory, and executes a fresh synchronization from the NAS source.  
+**Delete Local Cache:** Displays a confirmation prompt showing the cached folder name and permanently purges it from the local scratch disk (without touching NAS raw data).  
 
-### 3. Headless TrakEM2 Assembly Engine (`BioEM_Mosaic.py`)
-* **Two-Pass Hierarchical Registration:**
-  * **1st Pass (Intra-Layer 2D Montaging):** Stitches tiles belonging to the same section (in Z) using rigid transforms (`AlignTask.montageLayers`), locking internal slice geometry.
-  * **2nd Pass (Inter-Layer Z-Alignment):** Bypasses TrakEM2 modal dialogs (`GenericDialog`) by wrapping image patches into `RigidTile2D` models and invoking `Align.alignTileCollections` consecutively along the Z-axis, pinning Layer 0 as the reference anchor.
-  * **Per-Layer Seam Blending:** Iterates through each physical slice independently and executes `Blending.blendPatches` to normalize electron-beam intensity falloff and tile edge seams across spatial overlaps without causing 3D coordinate mismatch errors.
+### 3. PyTorch GPU/CPU Alignment Engine (`bioem_torch_align.py`)
+* **Pass 1 (2D Intra-Section Montaging):** Cross-correlates overlapping tile strips via bandpass-filtered FFT phase correlation (CUDA multi-GPU / Apple MPS / CPU) and solves global tile coordinates with weighted sparse least squares (`scipy.sparse.linalg.lsqr`).
+* **Pass 2 (Layer-as-Rigid-Unit Z-Alignment):** Aligns consecutive Z-sections using per-tile phase correlation and centroid-centered 2D Procrustes rigid fitting with median-displacement outlier rejection.
+* **Pass 3 (Native TrakEM2 XML Export):** Writes a Java 8 TrakEM2 `.xml` project directly to `Desktop/<ProjectName>/<ProjectName>.xml` and launches Fiji.
 
 ## Hardware & Software Requirements
 
@@ -54,98 +56,55 @@ The application and associated helper scripts were designed to accomodated MAPS 
 
 ## Installation & Deployment
 
-You can set up the pipeline either by downloading the pre-packaged release bundle or by compiling the standalone executable from source using PyInstaller.
+You can deploy the self-contained Windows release archive (`Preview_beta-YYYYMMMDD.zip`) or build it from source on a Windows workstation.
 
-### Method A: Quick Start via GitLab Release Bundle (Recommended)
+### Method A: Quick Start via Self-Contained Release Bundle (Recommended)
 
-Download the deployment package (`BioEM_Preview_v0.1.zip`). This can be found under the **Releases** section on this GitLab repository.
-Extract the ZIP file and place the individual assets into their designated locations:
+1. Download and extract `Preview_beta-YYYYMMMDD.zip` anywhere on the workstation (keep `Preview_beta-YYYYMMMDD.exe` and the `_internal\` folder together).
+2. Double-click `Preview_beta-YYYYMMMDD.exe`.
+3. On first launch, confirm or browse for the three paths in the **First-Run Setup Wizard** (pre-filled with the default `#CONFIGURATION` paths):
+   * **Scratch Disk (`DESTINATION_DIR`):** Local fast SSD (default `D:/`)
+   * **NAS Raw Data (`NAS_DIR`):** Network acquisition share (default `I:/`)
+   * **Fiji Executable (`APP_PATH`):** Java 8 Fiji executable (e.g., `C:\Users\User\Desktop\Fiji\fiji-windows-x64.exe`)
+   * **Background Indexer Auto-Start:** Automatically registers `Preview_beta-YYYYMMMDD.exe --indexer` in Windows Startup (`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup`).
+4. Click **Save & Deploy Sidecars** — the app stores settings in `%APPDATA%\BioEM_Preview\config.json`, deploys `BioEM_Watcher.ijm` into `<Fiji>\macros\AutoRun\`, and starts the background NAS indexer immediately with **no separate Python installation required**.
 
-| File from ZIP | Destination Target | Description |
-| :--- | :--- | :--- |
-| `BioEM_Preview.exe` | `Desktop` as a shortcut | The standalone GUI application |
-| `nas_indexer.py` | `D:\BioEM Sync Tool\nas_indexer.py` | Headless background scanner daemon |
-| `BioEM_Watcher.ijm` | `<Fiji_Path>\macros\AutoRun\BioEM_Watcher.ijm` | Polling macro (runs on Fiji startup) |
-| `BioEM_Mosaic.py` | `<Fiji_Path>\macros\BioEM_Mosaic.py` | Headless TrakEM2 alignment script |
+### Method B: Building `Preview_beta-YYYYMMMDD.zip` from Source (Windows)
 
-> **Note on Fiji Macro Deployment:** If the `<Fiji_Path>\macros\AutoRun\` folder does not exist, create it manually. Any `.ijm` script placed inside `AutoRun` executes automatically whenever Fiji launches. Currently, the active FIJI instance is placed on the desktop `C:\Users\User\Desktop\Fiji`
+#### 1. Set Up Python Environment & Dependencies
 
-### Method B: Building `pull_from_NAS.exe` from Source
-
-If you prefer to build the binary locally or make modifications to the UI:
-
-#### 1. Clone the Repository
-
-```bash
-git clone [https://gitlab.com/](https://gitlab.com/)<your-username-or-group>/bioem-pipeline.git C:\BioEM_Pipeline
-
-cd C:\BioEM_Pipeline
-```
-
-#### 2. Set Up Python Environment & Dependencies
-
-```bash
-# Recommended: virtual environment created with Python 3.10 or above
+```powershell
 python -m venv venv
 .\venv\Scripts\activate
 
-# Install required build packages
-pip install customtkinter psutil pyinstaller
+# Example with PyTorch CUDA 11.8 (or CPU wheel)
+pip install torch --index-url https://download.pytorch.org/whl/cu118
+pip install customtkinter psutil numpy scipy tifffile pyinstaller
 ```
 
-#### 3. Compile the Executable via PyInstaller
-
-Run PyInstaller directly from the repository root, ensuring the icon asset is bundled so `sys._MEIPASS` can extract it at runtime:
+#### 2. Build the Self-Contained Package
 
 ```powershell
-pyinstaller --noconsole `
---onefile `
---icon="app/assets/bioem_app.ico" `
---add-data "app/assets/bioem_app.ico;." `
---name "pull_from_NAS" `
-app/pull_from_NAS.py
+.\build_windows_release.ps1
 ```
 
-The compiled binary will be generated in `dist\pull_from_NAS.exe`.
-
-#### 4. Configure Application Paths
-
-If your workstation uses different drive letters or Fiji directories, adjust the constants near the top of `app/pull_from_NAS.py` before compiling:
-
-```python
-DESTINATION_DIR = "D:/" # Local SSD target cache
-
-NAS_DIR = "I:/" # Mapped NAS drive
-
-APP_PATH = r"C:\Users\User\Desktop\Fiji\fiji-windows-x64.exe" # Path to Fiji executable
-```
+This invokes `Preview_beta.spec` (`--onedir` PyInstaller build) and outputs `dist\Preview_beta-YYYYMMMDD.zip` ready for distribution.
 
 ## Usage Guide
 ---
-### 1. Start the Background Crawler
+### 1. Background Crawler (`--indexer`)
 
-The `nas_indexer.py` has been configured to run automatically in the background upon login on the SupportPC using Task Scheduler.
-
-Otherwise, manually run `nas_indexer.py` in the background::
-
-```powershell
-python "D:\BioEM Sync Tool\nas_indexer.py"
-```
-
-This service periodically crawls `I:/Maps` and maintains cached metadata under `%APPDATA%\fiji_latest_cache.json`.
+The background crawler is built directly into `Preview_beta-YYYYMMMDD.exe --indexer` (and starts automatically on app launch / Windows login when enabled in Setup or **⚙️ Settings & Paths**). It periodically crawls `<NAS_DIR>/Maps` and caches acquisition metadata under `%APPDATA%\BioEM_Preview\fiji_latest_cache.json`.
 
 ### 2. Launch the Application
 
-Double-click `BioEM_Preview.exe` (or run `python pull_from_NAS.py`):
+Double-click `Preview_beta-YYYYMMMDD.exe` (or run `python pull_from_NAS.py` from source):
 
 1. Find your acquisition under **Available on NAS** (or **All Available Data**).
-2. Click the dataset button to begin the delta sync to the local SSD.
-3. When the progress bar completes, Fiji alerts automatically:
-* **Single-Tile Z-Stacks:** Opened directly as an inverted image sequence.
-
-* **2D Mosaics & Mosaic Z-Stacks:** Dispatched to `BioEM_Mosaic.py` for headless 2D montaging, inter-layer rigid registration, and seam blending.
-
-4. The final, aligned TrakEM2 project workspace is saved to `C:\Users\<User>\Desktop\<ProjectName>\<ProjectName>.xml`.
+2. Click the dataset button to begin the delta sync to `<DESTINATION_DIR>\BioEM_Cache\`.
+3. When the sync completes, the pipeline routes automatically:
+   * **Single-Tile Z-Stacks:** Triggers Fiji (`BioEM_Watcher.ijm`) to open the folder as a virtual stack (`Image Sequence... sort use`) with inverted LUT.
+   * **2D Mosaics & Mosaic Z-Stacks:** Runs `bioem_torch_align.py` with live per-pass progress, elapsed time, and remaining time estimates, exports `Desktop\<ProjectName>\<ProjectName>.xml`, and opens the TrakEM2 project in Fiji.
 
 ## Roadmap
 ---

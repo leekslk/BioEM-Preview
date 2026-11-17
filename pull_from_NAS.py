@@ -1,434 +1,534 @@
+import multiprocessing
+import os
 import sys
-import customtkinter as ctk
+
+# Must run BEFORE importing GUI/torch libraries so `--indexer` stays lightweight
+# and PyInstaller worker processes behave safely on Windows.
+if __name__ == "__main__":
+    multiprocessing.freeze_support()
+    if "--indexer" in sys.argv:
+        from nas_indexer import run_indexer_loop
+        run_indexer_loop()
+        sys.exit(0)
+
+import json
+import shutil
+import subprocess
+import threading
+import time
 import tkinter as tk
 from tkinter import filedialog, messagebox
-import shutil
-import os
-import subprocess
-import tempfile
+
+import customtkinter as ctk
 import psutil
-import time
-import threading
-import json
 
-# CONFIGURATION 
-DESTINATION_DIR = "D:/" # Points to the local high-speed SSD
-NAS_DIR = "I:/"  # Points to the NAS
-APP_PATH = r"C:\Users\User\Desktop\Fiji\fiji-windows-x64.exe" # Point to the .exe inside the Fiji folder
-PROCESS_NAME = "fiji-windows-x64.exe" # Points to the process name in Task Manager (this might fail)
-HISTORY_FILE = os.path.join(os.getenv('APPDATA'), "fiji_sync_history.json")
-SCAN_INTERVAL = 2000 # 2 seconds for fast SSD cache polling
-# 
+from bioem_config import (
+    DEFAULT_CONFIG,
+    config_exists,
+    configure_indexer_autostart,
+    deploy_fiji_watcher,
+    detect_fiji_executable,
+    ensure_indexer_running,
+    get_cache_file_path,
+    get_history_file_path,
+    get_sync_cache_root,
+    get_trigger_file_path,
+    load_config,
+    resource_path,
+    save_config,
+)
+from nas_indexer import detect_acquisition_type
 
-# 2026JUN05: Fluent UI update, forces the app into Dark Mode regardless of Windows system settings
-ctk.set_appearance_mode("light") 
+# CONFIGURATION DEFAULTS (used to pre-populate the First-Run Setup Wizard)
+DESTINATION_DIR = DEFAULT_CONFIG["destination_dir"]
+NAS_DIR = DEFAULT_CONFIG["nas_dir"]
+APP_PATH = DEFAULT_CONFIG["app_path"]
+SCAN_INTERVAL = 2000  # 2 seconds for fast SSD cache polling
 
-# set a default accent color here (blue, green, dark-blue)
-ctk.set_default_color_theme("dark-blue") 
+# Fluent UI Light theme
+ctk.set_appearance_mode("light")
+ctk.set_default_color_theme("dark-blue")
 
-# FLUENT DESIGN CHEAT SHEET (For buttons and frames later)
-# Main Window Background: Default CustomTkinter Light
-# Card Container (fg_color): "#2d2d2d" or "#202020"
-# Primary Buttons (fg_color): "#0078d4" (Windows 11 Accent Blue)
-# Hover States (hover_color): "#2b88d8"
-# Corner Radius: 8 for Cards, 4 or 6 for Buttons
-# add refresh button for the impatient
 
-class NASPuller(ctk.CTk): #2026JUN05 Fluent UI refresh
-    def __init__(self): 
+def format_duration(seconds):
+    """Formats seconds into a readable elapsed/ETA string."""
+    seconds = max(0.0, float(seconds))
+    if seconds < 60.0:
+        return f"{seconds:.1f}s"
+    mins, secs = divmod(int(round(seconds)), 60)
+    if mins < 60:
+        return f"{mins}m {secs:02d}s"
+    hrs, mins = divmod(mins, 60)
+    return f"{hrs}h {mins:02d}m {secs:02d}s"
+
+
+class SetupDialog(ctk.CTkToplevel):
+    """First-run installation & Settings dialog prompting for local SSD, NAS, and Fiji paths."""
+
+    def __init__(self, parent, initial_cfg, is_first_run=False, on_saved=None):
+        super().__init__(parent)
+        self.on_saved = on_saved
+        self.saved = False
+        self.title("BioEM Preview — First-Run Setup" if is_first_run else "BioEM Preview — Settings")
+        self.geometry("680x430")
+        self.resizable(False, False)
+        self.transient(parent)
+        self.grab_set()
+
+        header_text = (
+            "Welcome to BioEM Preview — Configure Paths"
+            if is_first_run
+            else "Application & Pipeline Settings"
+        )
+        ctk.CTkLabel(
+            self, text=header_text, font=("Segoe UI", 18, "bold"), text_color="#111111"
+        ).pack(anchor="w", padx=25, pady=(20, 4))
+
+        sub_text = (
+            "Select your local fast scratch disk, raw NAS drive, and Fiji (Java 8) executable.\n"
+            "Saving will automatically deploy BioEM_Watcher.ijm to Fiji and start the NAS indexer."
+        )
+        ctk.CTkLabel(
+            self, text=sub_text, font=("Segoe UI", 11), text_color="#555555", justify="left"
+        ).pack(anchor="w", padx=25, pady=(0, 15))
+
+        form = ctk.CTkFrame(self, fg_color="transparent")
+        form.pack(fill="x", padx=25)
+        form.grid_columnconfigure(1, weight=1)
+
+        self.var_dest = tk.StringVar(value=initial_cfg.get("destination_dir", DESTINATION_DIR))
+        self.var_nas = tk.StringVar(value=initial_cfg.get("nas_dir", NAS_DIR))
+        detected_fiji = detect_fiji_executable(initial_cfg.get("app_path", APP_PATH))
+        self.var_fiji = tk.StringVar(value=detected_fiji)
+        self.var_autostart = tk.BooleanVar(value=bool(initial_cfg.get("auto_start_indexer", True)))
+
+        self._add_path_row(
+            form, row=0, label="Scratch Disk (DESTINATION_DIR):",
+            var=self.var_dest, browse_cmd=self._browse_dest,
+        )
+        self._add_path_row(
+            form, row=1, label="NAS Raw Data (NAS_DIR):",
+            var=self.var_nas, browse_cmd=self._browse_nas,
+        )
+        self._add_path_row(
+            form, row=2, label="Fiji Executable (APP_PATH):",
+            var=self.var_fiji, browse_cmd=self._browse_fiji,
+        )
+
+        self.chk_autostart = ctk.CTkCheckBox(
+            self,
+            text="Start background NAS crawler (--indexer) automatically when logging into Windows",
+            variable=self.var_autostart,
+            font=("Segoe UI", 12),
+        )
+        self.chk_autostart.pack(anchor="w", padx=25, pady=(18, 10))
+
+        self.feedback_lbl = ctk.CTkLabel(
+            self, text="", font=("Segoe UI", 11), text_color="#555555", wraplength=620, justify="left"
+        )
+        self.feedback_lbl.pack(anchor="w", padx=25, pady=(0, 10))
+
+        btn_bar = ctk.CTkFrame(self, fg_color="transparent")
+        btn_bar.pack(side="bottom", fill="x", padx=25, pady=20)
+
+        if not is_first_run:
+            ctk.CTkButton(
+                btn_bar, text="Cancel", width=110, fg_color="#d4d4d4",
+                text_color="black", hover_color="#c0c0c0", command=self.destroy,
+            ).pack(side="right", padx=(10, 0))
+
+        ctk.CTkButton(
+            btn_bar, text="Save & Deploy Sidecars", width=180,
+            fg_color="#0078d4", hover_color="#2b88d8", font=("Segoe UI", 12, "bold"),
+            command=self._save_and_apply,
+        ).pack(side="right")
+
+        self.protocol("WM_DELETE_WINDOW", self.destroy if not is_first_run else self._cancel_first_run)
+
+    def _add_path_row(self, parent, row, label, var, browse_cmd):
+        ctk.CTkLabel(parent, text=label, font=("Segoe UI", 12, "bold"), anchor="w").grid(
+            row=row, column=0, sticky="w", pady=8, padx=(0, 10)
+        )
+        ctk.CTkEntry(parent, textvariable=var, font=("Segoe UI", 11)).grid(
+            row=row, column=1, sticky="ew", pady=8, padx=(0, 8)
+        )
+        ctk.CTkButton(
+            parent, text="Browse...", width=85, fg_color="#e5e5e5",
+            text_color="black", hover_color="#d4d4d4", command=browse_cmd,
+        ).grid(row=row, column=2, pady=8)
+
+    def _browse_dest(self):
+        chosen = filedialog.askdirectory(title="Select Fast Scratch Disk / Cache Drive", initialdir=self.var_dest.get())
+        if chosen:
+            self.var_dest.set(chosen)
+
+    def _browse_nas(self):
+        chosen = filedialog.askdirectory(title="Select NAS Raw Data Directory", initialdir=self.var_nas.get())
+        if chosen:
+            self.var_nas.set(chosen)
+
+    def _browse_fiji(self):
+        filetypes = [("Executable", "*.exe"), ("All Files", "*.*")] if sys.platform == "win32" else [("All Files", "*")]
+        chosen = filedialog.askopenfilename(title="Select Fiji Executable (e.g., fiji-windows-x64.exe)", filetypes=filetypes)
+        if chosen:
+            self.var_fiji.set(chosen)
+
+    def _cancel_first_run(self):
+        # Even if closed early on first run, persist defaults so the app can start cleanly
+        self._save_and_apply()
+
+    def _save_and_apply(self):
+        dest_dir = self.var_dest.get().strip() or DESTINATION_DIR
+        nas_dir = self.var_nas.get().strip() or NAS_DIR
+        fiji_exe = self.var_fiji.get().strip() or APP_PATH
+        autostart = bool(self.var_autostart.get())
+
+        cfg = save_config({
+            "destination_dir": dest_dir,
+            "nas_dir": nas_dir,
+            "app_path": fiji_exe,
+            "auto_start_indexer": autostart,
+        })
+
+        notices = []
+        cache_root = get_sync_cache_root(dest_dir)
+        try:
+            os.makedirs(cache_root, exist_ok=True)
+        except Exception as exc:
+            notices.append(f"Cache dir notice ({cache_root}): {exc}")
+
+        ok_watcher, msg_watcher = deploy_fiji_watcher(fiji_exe)
+        if not ok_watcher:
+            notices.append(msg_watcher)
+
+        ok_auto, msg_auto = configure_indexer_autostart(autostart)
+        if not ok_auto:
+            notices.append(msg_auto)
+
+        ok_idx, msg_idx = ensure_indexer_running()
+        if not ok_idx:
+            notices.append(msg_idx)
+
+        if notices:
+            messagebox.showwarning("Setup Completed with Notices", "\n\n".join(notices), parent=self)
+
+        self.saved = True
+        if self.on_saved:
+            self.on_saved(cfg)
+        self.destroy()
+
+
+class NASPuller(ctk.CTk):
+    def __init__(self):
         super().__init__()
-        
-        # main window setup
-        self.title("NAS Smart Sync for Fiji")
-        self.geometry("1100x700") 
-        
+
+        self.config = load_config()
+        self._is_busy = False
+        self._last_cache_mtime = 0
+        self.history = []
+
+        self.title("BioEM Preview — NAS Smart Sync & PyTorch Aligner")
+        self.geometry("1120x720")
+
         # TaskBar and MenuBar icon
         try:
-            if getattr(sys, 'frozen', False): 
-                base_dir = sys._MEIPASS
-            else: 
-                base_dir = os.path.dirname(os.path.abspath(__file__))
-                
-            # Using your corrected filename!
-            icon_path = os.path.join(base_dir, "bioem_app.ico")
-            
-            # This single command overwrites the CustomTkinter blue square
-            self.iconbitmap(icon_path)
-            
-        except Exception as e: 
+            icon_path = resource_path("bioem_app.ico")
+            if os.path.exists(icon_path):
+                self.iconbitmap(icon_path)
+        except Exception as e:
             print(f"Icon Error: {e}")
-        
+
         # MASTER GRID: 1 Row, 2 Columns (Sidebar + Main Content)
         self.grid_rowconfigure(0, weight=1)
-        self.grid_columnconfigure(0, weight=0) # Sidebar does NOT stretch
-        self.grid_columnconfigure(1, weight=1) # Main Content stretches to fill space
+        self.grid_columnconfigure(0, weight=0)
+        self.grid_columnconfigure(1, weight=1)
 
         # ZONE 1: THE SIDEBAR (Left)
         self.sidebar = ctk.CTkFrame(self, width=260, corner_radius=0, fg_color="#f3f3f3")
         self.sidebar.grid(row=0, column=0, sticky="nsew")
-        
-        # We moved the flexible empty space from row 4 down to row 5 to make room!
-        self.sidebar.grid_rowconfigure(5, weight=1) 
+        self.sidebar.grid_rowconfigure(5, weight=1)
 
-        # Title / Branding
-        self.logo_label = ctk.CTkLabel(self.sidebar, text="NAS Smart Sync", font=("Segoe UI", 20, "bold"), text_color="#111111")
+        self.logo_label = ctk.CTkLabel(
+            self.sidebar, text="BioEM Preview", font=("Segoe UI", 20, "bold"), text_color="#111111"
+        )
         self.logo_label.grid(row=0, column=0, padx=20, pady=(30, 30))
 
-        # NAVIGATION MENUS
-        self.btn_nav_history = ctk.CTkButton(self.sidebar, text="🕒 Recent Local Syncs", 
-                                             font=("Segoe UI", 13), anchor="w", height=40,
-                                             fg_color="transparent", text_color="black", hover_color="#d4d4d4",
-                                             command=self.show_history_view)
+        self.btn_nav_history = ctk.CTkButton(
+            self.sidebar, text="🕒 Recent Local Syncs",
+            font=("Segoe UI", 13), anchor="w", height=40,
+            fg_color="transparent", text_color="black", hover_color="#d4d4d4",
+            command=self.show_history_view,
+        )
         self.btn_nav_history.grid(row=1, column=0, padx=15, pady=5, sticky="ew")
 
-        self.btn_nav_nas = ctk.CTkButton(self.sidebar, text="📡 Available on NAS", 
-                                         font=("Segoe UI", 13), anchor="w", height=40,
-                                         fg_color="#e5e5e5", text_color="black", hover_color="#e5e5e5",
-                                         command=self.show_nas_view)
+        self.btn_nav_nas = ctk.CTkButton(
+            self.sidebar, text="📡 Available on NAS",
+            font=("Segoe UI", 13), anchor="w", height=40,
+            fg_color="#e5e5e5", text_color="black", hover_color="#e5e5e5",
+            command=self.show_nas_view,
+        )
         self.btn_nav_nas.grid(row=2, column=0, padx=15, pady=5, sticky="ew")
 
-        # 1. Instantiate and grid the 3rd navigation option on row 3
-        self.btn_nav_all = ctk.CTkButton(self.sidebar, text="🗄️ All Available Data", 
-                                         font=("Segoe UI", 13), anchor="w", height=40,
-                                         fg_color="transparent", text_color="black", hover_color="#d4d4d4",
-                                         command=self.show_all_view)
+        self.btn_nav_all = ctk.CTkButton(
+            self.sidebar, text="🗄️ All Available Data",
+            font=("Segoe UI", 13), anchor="w", height=40,
+            fg_color="transparent", text_color="black", hover_color="#d4d4d4",
+            command=self.show_all_view,
+        )
         self.btn_nav_all.grid(row=3, column=0, padx=15, pady=5, sticky="ew")
 
-        # 2. Instantiate and grid the Refresh button on row 4
-        self.btn_refresh = ctk.CTkButton(self.sidebar, text="🔄 Force Refresh", 
-                                         font=("Segoe UI", 12), height=32,
-                                         fg_color="transparent", text_color="#0078d4", hover_color="#e5e5e5",
-                                         border_width=1, border_color="#0078d4",
-                                         command=self.manual_refresh_scan)
+        self.btn_refresh = ctk.CTkButton(
+            self.sidebar, text="🔄 Force Refresh",
+            font=("Segoe UI", 12), height=32,
+            fg_color="transparent", text_color="#0078d4", hover_color="#e5e5e5",
+            border_width=1, border_color="#0078d4",
+            command=self.manual_refresh_scan,
+        )
         self.btn_refresh.grid(row=4, column=0, padx=20, pady=(15, 0), sticky="ew")
 
-        # GLOBAL ACTIONS (Pinned to bottom: rows 6 and 7)
-        self.btn_manual = ctk.CTkButton(self.sidebar, text="Manually Select Folder", 
-                                        font=("Segoe UI", 12), height=36, fg_color="#d4d4d4", text_color="black", hover_color="#c8c8c8",
-                                        command=self.manual_select)
-        self.btn_manual.grid(row=6, column=0, padx=20, pady=(10, 10), sticky="ew")
+        # GLOBAL ACTIONS (Pinned to bottom: rows 6, 7, 8)
+        self.btn_settings = ctk.CTkButton(
+            self.sidebar, text="⚙️ Settings & Paths",
+            font=("Segoe UI", 12), height=34, fg_color="#e5e5e5", text_color="black", hover_color="#d4d4d4",
+            command=self.open_settings_dialog,
+        )
+        self.btn_settings.grid(row=6, column=0, padx=20, pady=(10, 8), sticky="ew")
 
-        self.btn_latest = ctk.CTkButton(self.sidebar, text="Pull Latest Acquisition", 
-                                        font=("Segoe UI", 12, "bold"), height=36,
-                                        fg_color="#0078d4", hover_color="#2b88d8",
-                                        command=self.pull_latest)
-        self.btn_latest.grid(row=7, column=0, padx=20, pady=(0, 30), sticky="ew")
+        self.btn_manual = ctk.CTkButton(
+            self.sidebar, text="Manually Select Folder",
+            font=("Segoe UI", 12), height=36, fg_color="#d4d4d4", text_color="black", hover_color="#c8c8c8",
+            command=self.manual_select,
+        )
+        self.btn_manual.grid(row=7, column=0, padx=20, pady=(0, 10), sticky="ew")
+
+        self.btn_latest = ctk.CTkButton(
+            self.sidebar, text="Pull Latest Acquisition",
+            font=("Segoe UI", 12, "bold"), height=36,
+            fg_color="#0078d4", hover_color="#2b88d8",
+            command=self.pull_latest,
+        )
+        self.btn_latest.grid(row=8, column=0, padx=20, pady=(0, 30), sticky="ew")
 
         # ZONE 2: MAIN CONTENT AREA (Right)
-        self.main_content = ctk.CTkFrame(self, corner_radius=0, fg_color="#ffffff") # Pure white
+        self.main_content = ctk.CTkFrame(self, corner_radius=0, fg_color="#ffffff")
         self.main_content.grid(row=0, column=1, sticky="nsew")
-        self.main_content.grid_rowconfigure(0, weight=1) 
+        self.main_content.grid_rowconfigure(0, weight=1)
         self.main_content.grid_columnconfigure(0, weight=1)
 
-        # CHANGE: Use CTkScrollableFrame instead of CTkFrame to support vertical scrolling
         self.history_card = ctk.CTkScrollableFrame(self.main_content, fg_color="#ffffff", corner_radius=12)
         self.nas_card = ctk.CTkScrollableFrame(self.main_content, fg_color="#ffffff", corner_radius=12)
-
-        # ADDED: 3rd Scrollable Card & Title
         self.all_card = ctk.CTkScrollableFrame(self.main_content, fg_color="#ffffff", corner_radius=12)
 
-        self.history_title = ctk.CTkLabel(self.history_card, text="Recent Local Syncs", font=("Segoe UI", 24, "bold"), text_color="black")
-        self.history_title.pack(anchor="w", padx=30, pady=(30, 20))
-
-        self.nas_title = ctk.CTkLabel(self.nas_card, text="Available on NAS (Last 14 Days)", font=("Segoe UI", 24, "bold"), text_color="black")
-        self.nas_title.pack(anchor="w", padx=30, pady=(30, 20))
-
-        # ADDED: Title for 3rd Card
-        self.all_title = ctk.CTkLabel(self.all_card, text="All Available Data", font=("Segoe UI", 24, "bold"), text_color="black")
-        self.all_title.pack(anchor="w", padx=30, pady=(30, 20))
+        ctk.CTkLabel(
+            self.history_card, text="Recent Local Syncs", font=("Segoe UI", 24, "bold"), text_color="black"
+        ).pack(anchor="w", padx=30, pady=(30, 20))
+        ctk.CTkLabel(
+            self.nas_card, text="Available on NAS (Last 14 Days)", font=("Segoe UI", 24, "bold"), text_color="black"
+        ).pack(anchor="w", padx=30, pady=(30, 20))
+        ctk.CTkLabel(
+            self.all_card, text="All Available Data", font=("Segoe UI", 24, "bold"), text_color="black"
+        ).pack(anchor="w", padx=30, pady=(30, 20))
 
         # STATUS FOOTER
-        self.footer_card = ctk.CTkFrame(self.main_content, corner_radius=0, fg_color="#f9f9f9", height=120)
+        self.footer_card = ctk.CTkFrame(self.main_content, corner_radius=0, fg_color="#f9f9f9", height=125)
         self.footer_card.grid(row=1, column=0, sticky="ew")
-        
-        # Transfer Progress Bar
+
         self.progress = ctk.CTkProgressBar(self.footer_card, progress_color="#0078d4")
         self.progress.set(0)
-        self.progress.pack(fill="x", padx=40, pady=(20, 5))
+        self.progress.pack(fill="x", padx=40, pady=(18, 6))
 
-        # Live Status Text
-        self.status = ctk.CTkLabel(self.footer_card, text="System Ready.", font=("Segoe UI", 11), text_color="#555")
-        self.status.pack(pady=(0, 5))
-        
-        # Background Scanner Preview Text
-        self.latest_path_label = ctk.CTkLabel(self.footer_card, text="Scanning...", font=("Segoe UI", 11, "italic"), text_color="#888") # Background Scanner Preview Text
-        self.latest_path_label.pack(pady=(0, 15))
-        
-        # DYNAMIC CONTENT INITIALISATION
-        # Create empty lists to track the UI buttons so that we can delete and refresh them later
-        self.nas_rows = []         # Holds the row frames to wipe on re-render
-        self.nas_buttons = []      # Holds the CTkButton objects for disabling/enabling
+        self.status = ctk.CTkLabel(self.footer_card, text="System Ready.", font=("Segoe UI", 11, "bold"), text_color="#333333")
+        self.status.pack(pady=(0, 3))
+
+        self.latest_path_label = ctk.CTkLabel(
+            self.footer_card, text="Scanning...", font=("Segoe UI", 11, "italic"), text_color="#777777"
+        )
+        self.latest_path_label.pack(pady=(0, 14))
+
+        self.nas_rows = []
+        self.nas_buttons = []
         self.history_rows = []
         self.history_buttons = []
         self.all_rows = []
         self.all_buttons = []
 
-        # 2026OCT16: Added line to track last seen cache modification time to prevent flickering
-        self._last_cache_mtime = 0
-        
         self.load_history()
-        self.render_nas_buttons()     
-        self.render_history_buttons()  
-        self.show_nas_view()         # Default view on startup, changed to NAS view
+        self.render_nas_buttons()
+        self.render_history_buttons()
+        self.show_nas_view()
 
-        # Start Background Scans
-        self.after(100, self.launch_background_scan)                            # Wait 100ms for the UI to finish drawing, then start the looping NAS scan (prevents startup crash)
-        threading.Thread(target=self._run_housekeeping, daemon=True).start()    # Spawn a silent, one-time background thread to delete folders older than 30 days
-        
-        # Catch the 'X' button click to ensure a clean exit
+        # First-run setup wizard or silent startup initialization
+        self.after(150, self._startup_initialize)
         self.protocol("WM_DELETE_WINDOW", self.on_closing)
 
-    def on_closing(self): # Forces a hard exit, dropping all file locks so PyInstaller can delete the temp folder.
-        self.destroy() # Closes the CustomTkinter UI visually
-        os._exit(0)    # Brutally kills the Python engine and background threads instantly
+    def _startup_initialize(self):
+        if not config_exists():
+            SetupDialog(self, self.config, is_first_run=True, on_saved=self._on_config_updated)
+        else:
+            try:
+                os.makedirs(get_sync_cache_root(self.config.get("destination_dir")), exist_ok=True)
+            except Exception:
+                pass
+            deploy_fiji_watcher(self.config.get("app_path"))
+            ensure_indexer_running()
 
-    # add show_history_view and show_nas_view for Sidebar Navigation Logic
-    def show_history_view(self): # Hides the NAS view, shows the History view, and updates button colors.
+        self.launch_background_scan()
+        threading.Thread(target=self._run_housekeeping, daemon=True).start()
+
+    def _on_config_updated(self, new_cfg):
+        self.config = new_cfg
+        self._last_cache_mtime = 0
+        self.status.configure(
+            text=f"Configured | Scratch: {new_cfg['destination_dir']} | NAS: {new_cfg['nas_dir']}",
+            text_color="#0078d4",
+        )
+        self.manual_refresh_scan()
+
+    def open_settings_dialog(self):
+        SetupDialog(self, self.config, is_first_run=False, on_saved=self._on_config_updated)
+
+    def on_closing(self):
+        self.destroy()
+        os._exit(0)
+
+    # Sidebar Navigation Logic
+    def show_history_view(self):
         self.nas_card.grid_forget()
         self.all_card.grid_forget()
         self.history_card.grid(row=0, column=0, sticky="nsew")
-        
-        # Highlight the active menu button
         self.btn_nav_history.configure(fg_color="#e5e5e5")
         self.btn_nav_nas.configure(fg_color="transparent")
         self.btn_nav_all.configure(fg_color="transparent")
 
-    def show_nas_view(self): # Hides the History view, shows the NAS view, and updates button colors.
+    def show_nas_view(self):
         self.history_card.grid_forget()
         self.all_card.grid_forget()
         self.nas_card.grid(row=0, column=0, sticky="nsew")
-        
-        # Highlight the active menu button
         self.btn_nav_nas.configure(fg_color="#e5e5e5")
         self.btn_nav_history.configure(fg_color="transparent")
         self.btn_nav_all.configure(fg_color="transparent")
 
-    # 2026OCT09: ADDED Method for 3rd view
     def show_all_view(self):
         self.history_card.grid_forget()
         self.nas_card.grid_forget()
         self.all_card.grid(row=0, column=0, sticky="nsew")
-        
         self.btn_nav_all.configure(fg_color="#e5e5e5")
         self.btn_nav_history.configure(fg_color="transparent")
         self.btn_nav_nas.configure(fg_color="transparent")
 
-    # MANUAL REFRESH LOGIC
+    # Manual & Background Scan
     def manual_refresh_scan(self):
-        """Triggered by the Refresh button. Disables the button temporarily to prevent spamming."""
-        self._last_cache_mtime = 0 # Force re-render
+        self._last_cache_mtime = 0
         self.btn_refresh.configure(text="⏳ Scanning...", state="disabled")
-        self.status.configure(text="Manual scan initiated...")
-        
-        # Run in a quick one-off thread so we don't freeze the UI or duplicate the 30-second looping timer
+        if not self._is_busy:
+            self.status.configure(text="Manual scan initiated...", text_color="#333333")
         threading.Thread(target=self._manual_refresh_worker, daemon=True).start()
 
     def _manual_refresh_worker(self):
-        """The worker that performs the manual scan quietly in the background."""
         try:
-            latest = self.get_latest_folder(NAS_DIR)
-            
-            if latest:
-                parts = latest.replace("\\", "/").split("/")
-                parts = [p for p in parts if p]
-                display_path = ".../" + "/".join(parts[-3:]) if len(parts) > 3 else latest
-                self.latest_path_label.configure(text=f"Detected: {display_path}", text_color="gray")
-                self.status.configure(text="Manual Scan Complete.")
-            else:
-                self.latest_path_label.configure(text="No .tif in LayersData found.", text_color="gray")
-                self.status.configure(text="Ready (No acquisitions found)")
-                
+            nas_dir = self.config.get("nas_dir", NAS_DIR)
+            latest = self.get_latest_folder(nas_dir)
+            if not self._is_busy:
+                if latest:
+                    parts = [p for p in latest.replace("\\", "/").split("/") if p]
+                    display_path = ".../" + "/".join(parts[-3:]) if len(parts) > 3 else latest
+                    self.after(0, lambda: self.latest_path_label.configure(text=f"Detected: {display_path}", text_color="gray"))
+                    self.after(0, lambda: self.status.configure(text="Manual Scan Complete.", text_color="#333333"))
+                else:
+                    self.after(0, lambda: self.latest_path_label.configure(text="No .tif in LayersData found.", text_color="gray"))
+                    self.after(0, lambda: self.status.configure(text="Ready (No acquisitions found)", text_color="#333333"))
         except Exception as e:
             print(f"Manual scan error: {e}")
-            self.status.configure(text="Scan Error Encountered", text_color="red")
+            self.after(0, lambda: self.status.configure(text="Scan Error Encountered", text_color="red"))
         finally:
-            # Re-render the buttons safely on the main thread
             self.after(0, self.render_nas_buttons)
-            # Turn the refresh button back on
             self.after(0, lambda: self.btn_refresh.configure(text="🔄 Force Refresh", state="normal"))
 
-    # Background Initialisation, Automation and Threading
-    def launch_background_scan(self): # starts the background thread, keeps UI responsive
+    def launch_background_scan(self):
         threading.Thread(target=self._run_background_scan, daemon=True).start()
 
-    #helper methods to do naughty stuff in the background
-    def launch_gpu_shadow(self, target_folder, project_name, rows=1, cols=1):
-        """
-        Detached, invisible background job running bioem_proc.py on dual RTX A4000 GPUs.
-        Outputs an OME-Zarr store to D:/<project_name>.zarr.
-        """
+    def _run_background_scan(self):
+        cache_file = get_cache_file_path()
         try:
-            output_zarr = f"D:/{project_name}.zarr"
-            script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bioem_proc.py")
-            
-            if not os.path.exists(script_path):
-                print(f"[Shadow Pipeline] Script not found: {script_path}")
-                return
-
-            cmd = [
-                sys.executable,
-                script_path,
-                target_folder,
-                output_zarr,
-                str(rows),
-                str(cols)
-            ]
-
-            # CREATE_NO_WINDOW (0x08000000) keeps the worker completely invisible to the user on Windows
-            creation_flags = 0x08000000 if sys.platform == "win32" else 0
-            
-            subprocess.Popen(
-                cmd,
-                creationflags=creation_flags,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )
-            print(f"[Shadow Pipeline] Dispatched headless GPU build -> {output_zarr}")
-        except Exception as e:
-            # Silent catch so user experience in the traditional workflow is never interrupted
-            print(f"[Shadow Pipeline Error] {e}")
-
-    def _run_background_scan(self): # worker function for the background thread
-        CACHE_FILE = os.path.join(os.getenv('APPDATA'), "fiji_latest_cache.json")
-        try:
-            if os.path.exists(CACHE_FILE):
-                current_mtime = os.path.getmtime(CACHE_FILE)
-
-                # ONLY refresh UI elements if the indexer has actually updated the cache
+            if os.path.exists(cache_file):
+                current_mtime = os.path.getmtime(cache_file)
                 if current_mtime > self._last_cache_mtime:
                     self._last_cache_mtime = current_mtime
-                    
-                    # Update buttons on the main UI thread
                     self.after(0, self.render_nas_buttons)
-                    
-                    # Read cache to update the preview label
-                    with open(CACHE_FILE, "r") as f:
+
+                    with open(cache_file, "r", encoding="utf-8") as f:
                         data = json.load(f)
 
-                    # Also update "Detected: ..." label quietly
-                    with open(CACHE_FILE, "r") as f:
-                        data = json.load(f)
-                    
-                    latest = data.get("latest_folder") if isinstance(data, dict) else None
-                    if latest:
-                        parts = latest.replace("\\", "/").split("/")
-                        parts = [p for p in parts if p]
-                        display_path = ".../" + "/".join(parts[-3:]) if len(parts) > 3 else latest
-                        self.latest_path_label.configure(text=f"Detected: {display_path}", text_color="gray")
-                        self.status.configure(text="Ready.")
-                    else:
-                        self.latest_path_label.configure(text="No acquisitions found in cache.", text_color="gray")
-                        self.status.configure(text="Ready.")
-
+                    if not self._is_busy:
+                        latest = data.get("latest_folder") if isinstance(data, dict) else None
+                        if latest:
+                            parts = [p for p in latest.replace("\\", "/").split("/") if p]
+                            display_path = ".../" + "/".join(parts[-3:]) if len(parts) > 3 else latest
+                            self.after(0, lambda dp=display_path: self.latest_path_label.configure(
+                                text=f"Detected: {dp}", text_color="gray"
+                            ))
+                            self.after(0, lambda: self.status.configure(text="Ready.", text_color="#333333"))
+                        else:
+                            self.after(0, lambda: self.latest_path_label.configure(
+                                text="No acquisitions found in cache.", text_color="gray"
+                            ))
+                            self.after(0, lambda: self.status.configure(text="Ready.", text_color="#333333"))
         except Exception as e:
             print(f"Background check error: {e}")
         finally:
-            # Poll quietly every 2 seconds (lightweight, no more UI flashing)
             self.after(SCAN_INTERVAL, self.launch_background_scan)
-                    
-            
-    # Addition on 2026JUN05
-    def _run_housekeeping(self): # Background process: Scans SSD and deletes old synced folders based on an exclusion list.
+
+    def _run_housekeeping(self):
+        """Scans BioEM_Cache inside DESTINATION_DIR and removes cached acquisitions older than 30 days."""
         try:
-            # 1. Setup the 30-day cutoff time
             seconds_in_30_days = 30 * 24 * 60 * 60
             cutoff_time = time.time() - seconds_in_30_days
-            
-            # 2. Define the protected folders (set lowercase for case-insensitive matching)
-            protected_folders = [
-                "bioem sync tool", 
-                "pc_backup", 
-                "shareddata", 
-                "software",
-                # Safety first: Protect hidden Windows system folders on the root drive (if any)
-                "system volume information", 
-                "$recycle.bin",
-                "msocache"
-            ]
-            
-            # Ensure the drive is available before scanning
-            if not os.path.exists(DESTINATION_DIR):
+            cache_root = get_sync_cache_root(self.config.get("destination_dir"))
+            if not os.path.exists(cache_root):
                 return
 
-            # 3. Scan the D:/ drive
-            for item in os.listdir(DESTINATION_DIR):
-                item_path = os.path.join(DESTINATION_DIR, item)
-                
-                # We ONLY want to delete directories, not loose files on the root drive
+            for item in os.listdir(cache_root):
+                item_path = os.path.join(cache_root, item)
                 if not os.path.isdir(item_path):
                     continue
-                    
-                # 4. Check the exclusion list
-                if item.lower() in protected_folders:
-                    continue
-                    
-                # 5. Check the age of the folder
                 try:
-                    folder_mtime = os.path.getmtime(item_path)
-                    
-                    if folder_mtime < cutoff_time:
-                        # Obliterate the old folder
+                    if os.path.getmtime(item_path) < cutoff_time:
                         shutil.rmtree(item_path)
-                        # Remove it from the local history JSON if it's in there
-                        if path in self.history:
-                            self.history.remove(path)
                 except Exception:
-                    # Fail silently on individual folders (e.g., if a file inside is currently open/locked)
                     continue
-                    
-            # Save the history list in case we pruned old references
-            with open(HISTORY_FILE, "w") as f:
-                json.dump(self.history, f)
-            # Update the right-hand column so it doesn't show deleted paths
-            self.after(0, self.render_history_buttons)
-            
         except Exception:
-            pass # Fail silently so main app experience is never interrupted
+            pass
 
-    # File detection Logic
-    def get_latest_folder(self, base_path): # Reads the lightning-fast cache created by the Indexer script.
-        CACHE_FILE = os.path.join(os.getenv('APPDATA'), "fiji_latest_cache.json")
-        
-        if os.path.exists(CACHE_FILE):
+    # File Detection Logic
+    def get_latest_folder(self, base_path):
+        cache_file = get_cache_file_path()
+        if os.path.exists(cache_file):
             try:
-                with open(CACHE_FILE, "r") as f:
+                with open(cache_file, "r", encoding="utf-8") as f:
                     data = json.load(f)
-                
                 cached_path = data.get("latest_folder")
                 cache_time = data.get("timestamp", 0)
-                
-                # Optional safety check: Ensure the cache isn't ancient (e.g., older than 2 hours)
-                if time.time() - cache_time < 7200: 
-                    # Double-check the folder still actually exists before returning it
-                    if cached_path and os.path.exists(cached_path):
-                        return cached_path
-            except:
+                if time.time() - cache_time < 7200 and cached_path and os.path.exists(cached_path):
+                    return cached_path
+            except Exception:
                 pass
-        
-        # Replaced old deep walk with mtime-pruned scan
         return self.find_latest_acquisition_fast(base_path)
 
     def find_latest_acquisition_fast(self, root_dir):
-        """
-        Dynamically locates the newest valid acquisition folder under LayersData
-        containing .tif/.tiff files within the last 14 days.
-        """
         search_root = os.path.join(root_dir, "Maps") if os.path.exists(os.path.join(root_dir, "Maps")) else root_dir
         if not os.path.exists(search_root):
             return None
 
         cutoff_time = time.time() - (14 * 24 * 60 * 60)
         found = []
-
         try:
             for root, dirs, files in os.walk(search_root, topdown=True):
                 if "electron snapshot" in root.lower():
                     dirs[:] = []
                     continue
-
                 norm_root = root.replace("\\", "/").lower()
                 if "/layersdata/" in norm_root or norm_root.endswith("/layersdata"):
-                    tifs = [f for f in files if f.lower().endswith(('.tif', '.tiff'))]
+                    tifs = [f for f in files if f.lower().endswith((".tif", ".tiff"))]
                     if tifs:
                         try:
                             folder_mtime = max(os.path.getmtime(os.path.join(root, f)) for f in tifs)
@@ -438,101 +538,98 @@ class NASPuller(ctk.CTk): #2026JUN05 Fluent UI refresh
                                 continue
                         except Exception:
                             pass
-
             if found:
                 found.sort(key=lambda x: x[0], reverse=True)
                 return found[0][1]
-
         except Exception as e:
             print(f"Scan error: {e}")
-
         return None
 
-    # Managing Previously "read" folders and files / History Management UI
-    # HISTORY & NAS BROWSER UI
-    def load_history(self): # Loads the last 3 local sync paths from a JSON file.
-        if os.path.exists(HISTORY_FILE):
+    # History & Breadcrumbs
+    def load_history(self):
+        history_file = get_history_file_path()
+        if os.path.exists(history_file):
             try:
-                with open(HISTORY_FILE, "r") as f: self.history = json.load(f)
-            except: self.history = []
-        else: self.history = []
+                with open(history_file, "r", encoding="utf-8") as f:
+                    self.history = json.load(f)
+            except Exception:
+                self.history = []
+        else:
+            self.history = []
 
-    def save_history(self, path): # Updates history, saves to disk, and refreshes the right-hand UI.
-        if path in self.history: self.history.remove(path)
+    def save_history(self, path):
+        if path in self.history:
+            self.history.remove(path)
         self.history.insert(0, path)
         self.history = self.history[:21]
-        with open(HISTORY_FILE, "w") as f:
+        with open(get_history_file_path(), "w", encoding="utf-8") as f:
             json.dump(self.history, f)
-        # Refresh the local history side
         self.render_history_buttons()
 
     def remove_from_history(self, path):
-        """Removes selected entry from local history list and refreshes cards."""
         if path in self.history:
             self.history.remove(path)
             try:
-                with open(HISTORY_FILE, "w") as f:
+                with open(get_history_file_path(), "w", encoding="utf-8") as f:
                     json.dump(self.history, f)
             except Exception as e:
                 print(f"Error updating history file: {e}")
             self.render_history_buttons()
 
+    def _extract_project_and_folder(self, source_folder):
+        """Extracts (project_name, safe_folder_name, display_title) consistently from a NAS/source path."""
+        try:
+            path_parts = [p for p in source_folder.replace("\\", "/").split("/") if p]
+            ld_index = next((i for i, p in enumerate(path_parts) if "layersdata" in p.lower()), -1)
+            project_name = path_parts[ld_index - 1] if ld_index > 0 else "Unknown_Project"
+            tile_name = path_parts[-1]
+            display_title = f"{project_name} ➔ {tile_name}"
+            raw_folder_name = f"{project_name}_{tile_name}".replace(" ", "_")
+            safe_folder_name = "".join(c for c in raw_folder_name if c.isalnum() or c in ["_", "-"])
+            safe_project_name = "".join(c for c in project_name.replace(" ", "_") if c.isalnum() or c in ["_", "-"]) or "EM_Project"
+            return safe_project_name, safe_folder_name, display_title
+        except Exception:
+            base = os.path.basename(source_folder.rstrip("\\/")) or "EM_Project"
+            safe = "".join(c for c in base.replace(" ", "_") if c.isalnum() or c in ["_", "-"]) or "EM_Project"
+            return safe, safe, base
+
     def format_breadcrumb(self, path, prefix=""):
         try:
-            parts = path.replace("\\", "/").split("/")
-            parts = [p for p in parts if p]
-            
-            # 1. Locate 'Maps' to identify the top-level user/owner folder
+            parts = [p for p in path.replace("\\", "/").split("/") if p]
             maps_index = next((idx for idx, p in enumerate(parts) if p.lower() == "maps"), -1)
             owner = parts[maps_index + 1] if (maps_index != -1 and maps_index + 1 < len(parts)) else ""
-
-            # 2. Locate 'LayersData'
             ld_index = next((idx for idx, p in enumerate(parts) if "layersdata" in p.lower()), -1)
-            
             if ld_index > 0:
-                # The acquisition/session project folder sits directly before LayersData
                 project = parts[ld_index - 1]
-                
-                # Everything inside LayersData (e.g. ['Layer', 'Tile Set (2)'] or ['STACK-01', 'Tile Set (6)'])
                 tail = " / ".join(parts[ld_index + 1:])
-                
-                # Format: Prefix Project ➔ Owner / Container / TileSet
                 if owner and tail:
                     return f"{prefix} {project} ➔ {owner} / {tail}"
-                elif tail:
+                if tail:
                     return f"{prefix} {project} ➔ {tail}"
                 return f"{prefix} {project}"
-
             return f"{prefix} {parts[-1]}"
         except Exception:
             return f"{prefix} {os.path.basename(path)}"
 
     def _create_badge_and_button(self, parent_container, item_path, acq_type="z-stack", rows=1, cols=1, prefix="📡", is_history=False):
-        """
-        Builds a consistent row with a rounded type badge and breadcrumb button.
-        Returns (row_frame, btn).
-        """
         btn_text = self.format_breadcrumb(item_path, prefix=prefix)
-
-        # 1. Row Container
         row_frame = ctk.CTkFrame(parent_container, fg_color="transparent")
         row_frame.pack(fill="x", padx=30, pady=3)
 
-        # 2. Badge Styling
         if acq_type == "mosaic-z":
-            badge_text = "Mosaic Z-Stack"
-            badge_bg = "#e74c3c"  # Fluent Red
-            badge_width = 190
+            badge_text = f"Mosaic Z ({rows}x{cols})"
+            badge_bg = "#8e44ad"  # Fluent Purple
+            badge_width = 115
         elif acq_type == "mosaic":
             badge_text = f"Mosaic ({rows}x{cols})"
             badge_bg = "#e67e22"  # Fluent Orange
-            badge_width = 95
+            badge_width = 115
         else:
             badge_text = "Z-Stack"
             badge_bg = "#2ecc71"  # Fluent Green
-            badge_width = 65
+            badge_width = 115
 
-        badge = ctk.CTkLabel(
+        ctk.CTkLabel(
             row_frame,
             text=badge_text,
             fg_color=badge_bg,
@@ -540,11 +637,9 @@ class NASPuller(ctk.CTk): #2026JUN05 Fluent UI refresh
             corner_radius=6,
             font=("Segoe UI", 9, "bold"),
             width=badge_width,
-            height=24
-        )
-        badge.pack(side="left", padx=(0, 8))
+            height=24,
+        ).pack(side="left", padx=(0, 8))
 
-        # 3. Action Button
         btn_fg = "transparent" if is_history else "#f0f0f0"
         btn_border = 1 if is_history else 0
         btn_border_col = "#d0d0d0" if is_history else None
@@ -562,636 +657,486 @@ class NASPuller(ctk.CTk): #2026JUN05 Fluent UI refresh
             border_color=btn_border_col,
             anchor="w",
             corner_radius=6,
-            command=lambda: self.run_sync(item_path, acq_type=acq_type, rows=rows, cols=cols)
+            command=lambda p=item_path, t=acq_type, r=rows, c=cols: self.run_sync(p, acq_type=t, rows=r, cols=c),
         )
         btn.pack(side="left", fill="x", expand=True)
 
-        # Bind right-click menu
         if is_history:
             btn.bind("<Button-3>", lambda event, p=item_path: self.show_history_context_menu(event, p))
         else:
             btn.bind("<Button-3>", lambda event, p=item_path: self.show_context_menu(event, p))
 
         return row_frame, btn
-    
-    def render_nas_buttons(self): # LEFT COLUMN: Displays latest folders found by the Indexer.
-        # 1. Clean up previous frames and buttons
-        for row in getattr(self, 'nas_rows', []): row.destroy()
-        for row in getattr(self, 'all_rows', []): row.destroy()
+
+    def render_nas_buttons(self):
+        for row in getattr(self, "nas_rows", []):
+            row.destroy()
+        for row in getattr(self, "all_rows", []):
+            row.destroy()
 
         self.nas_rows = []
         self.nas_buttons = []
         self.all_rows = []
         self.all_buttons = []
 
-        cache_path = os.path.join(os.getenv('APPDATA'), "fiji_latest_cache.json")
+        cache_path = get_cache_file_path()
         if os.path.exists(cache_path):
             try:
-                with open(cache_path, "r") as f:
+                with open(cache_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
-
-                if isinstance(data, dict):
-                    acquisitions = data.get("acquisitions", [])
-                elif isinstance(data, list):
-                    acquisitions = data
-                else:
-                    acquisitions = []
+                acquisitions = data.get("acquisitions", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
 
                 cutoff_time = time.time() - (14 * 24 * 60 * 60)
                 within_14_days_count = sum(
-                    1 for item in acquisitions 
+                    1 for item in acquisitions
                     if (item.get("mtime", 0) if isinstance(item, dict) else 0) >= cutoff_time
                 )
-                
                 split_index = max(within_14_days_count, 12)
                 nas_items = acquisitions[:split_index]
                 all_items = acquisitions[split_index:]
 
-                # 1. Render 'Available on NAS'
                 for item in nas_items:
-                    path = item.get('path') if isinstance(item, dict) else item
-                    if not path: continue
-
-                    acq_type = item.get('type', 'z-stack') if isinstance(item, dict) else 'z-stack'
-                    rows = item.get('rows', 1) if isinstance(item, dict) else 1
-                    cols = item.get('cols', 1) if isinstance(item, dict) else 1
-
+                    path = item.get("path") if isinstance(item, dict) else item
+                    if not path:
+                        continue
+                    acq_type = item.get("type", "z-stack") if isinstance(item, dict) else "z-stack"
+                    rows = item.get("rows", 1) if isinstance(item, dict) else 1
+                    cols = item.get("cols", 1) if isinstance(item, dict) else 1
                     row_frame, btn = self._create_badge_and_button(
-                        parent_container=self.nas_card,
-                        item_path=path,
-                        acq_type=acq_type,
-                        rows=rows,
-                        cols=cols,
-                        prefix="📡",
-                        is_history=False
+                        self.nas_card, path, acq_type=acq_type, rows=rows, cols=cols, prefix="📡", is_history=False
                     )
                     self.nas_rows.append(row_frame)
                     self.nas_buttons.append(btn)
 
-                # 2. Render 'All Available Data'
                 for item in all_items:
-                    path = item.get('path') if isinstance(item, dict) else item
-                    if not path: continue
-
-                    acq_type = item.get('type', 'z-stack') if isinstance(item, dict) else 'z-stack'
-                    rows = item.get('rows', 1) if isinstance(item, dict) else 1
-                    cols = item.get('cols', 1) if isinstance(item, dict) else 1
-
+                    path = item.get("path") if isinstance(item, dict) else item
+                    if not path:
+                        continue
+                    acq_type = item.get("type", "z-stack") if isinstance(item, dict) else "z-stack"
+                    rows = item.get("rows", 1) if isinstance(item, dict) else 1
+                    cols = item.get("cols", 1) if isinstance(item, dict) else 1
                     row_frame, btn = self._create_badge_and_button(
-                        parent_container=self.all_card,
-                        item_path=path,
-                        acq_type=acq_type,
-                        rows=rows,
-                        cols=cols,
-                        prefix="📁",
-                        is_history=False
+                        self.all_card, path, acq_type=acq_type, rows=rows, cols=cols, prefix="📁", is_history=False
                     )
                     self.all_rows.append(row_frame)
                     self.all_buttons.append(btn)
-
             except Exception as e:
                 print(f"Error rendering NAS buttons: {e}")
 
+        if self._is_busy:
+            self._set_action_buttons_state("disabled")
+
     def render_history_buttons(self):
-        for row in getattr(self, 'history_rows', []): row.destroy()
+        for row in getattr(self, "history_rows", []):
+            row.destroy()
         self.history_rows = []
         self.history_buttons = []
 
-        # Load cache dictionary to look up metadata for history paths
         meta_lookup = {}
-        cache_path = os.path.join(os.getenv('APPDATA'), "fiji_latest_cache.json")
+        cache_path = get_cache_file_path()
         if os.path.exists(cache_path):
             try:
-                with open(cache_path, "r") as f:
+                with open(cache_path, "r", encoding="utf-8") as f:
                     cdata = json.load(f)
                 acqs = cdata.get("acquisitions", []) if isinstance(cdata, dict) else cdata
                 for a in acqs:
                     if isinstance(a, dict) and "path" in a:
-                        norm = a["path"].replace("\\", "/").lower()
-                        meta_lookup[norm] = a
+                        meta_lookup[a["path"].replace("\\", "/").lower()] = a
             except Exception:
                 pass
 
         for path in reversed(self.history):
-            if not path: continue
-            norm_p = path.replace("\\", "/").lower()
-            item_meta = meta_lookup.get(norm_p, {})
-
-            acq_type = item_meta.get("type", "z-stack")
-            rows = item_meta.get("rows", 1)
-            cols = item_meta.get("cols", 1)
-
+            if not path:
+                continue
+            item_meta = meta_lookup.get(path.replace("\\", "/").lower(), {})
             row_frame, btn = self._create_badge_and_button(
-                parent_container=self.history_card,
-                item_path=path,
-                acq_type=acq_type,
-                rows=rows,
-                cols=cols,
+                self.history_card,
+                path,
+                acq_type=item_meta.get("type", "z-stack"),
+                rows=item_meta.get("rows", 1),
+                cols=item_meta.get("cols", 1),
                 prefix="🕒",
-                is_history=True
+                is_history=True,
             )
             self.history_rows.append(row_frame)
             self.history_buttons.append(btn)
 
-    # RIGHT-CLICK WIPE & RE-SYNC MODULE
-    def show_context_menu(self, event, path): # Spawns a right-click menu at the mouse coordinates.
+        if self._is_busy:
+            self._set_action_buttons_state("disabled")
+
+    # Context Menus & Local Data Management
+    def show_context_menu(self, event, path):
         menu = tk.Menu(self, tearoff=0)
-        # (1) Existing Refresh Option
-        menu.add_command(
-            label="Refresh Folder (Wipe & Sync)", command=lambda: self.wipe_and_sync(folder_name)
-            )
-        # (2) Permanent Deletion Option
-        menu.add_command(
-            label="Delete Existing Data", command=lambda: self.show_delete_modal(folder_name)
-            )
-        menu.add_separator()
-        # (3) Experimental Napari Shadow Option
-        menu.add_command(
-            label="Show Me the Future", command=lambda: self.show_future_modal(folder_name)
-        )
+        menu.add_command(label="🔄 Refresh Folder (Wipe & Sync)", command=lambda p=path: self.confirm_refresh(p))
+        menu.add_command(label="🗑️ Delete Local Cache", command=lambda p=path: self.show_delete_modal(p))
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
             menu.grab_release()
 
-    def show_history_context_menu(self, event, path): # Extended right-click menu exclusively for Recent Local Syncs."""
+    def show_history_context_menu(self, event, path):
         menu = tk.Menu(self, tearoff=0, font=("Arial", 10))
         menu.add_command(label="🔄 Refresh Folder (Wipe & Sync)", command=lambda p=path: self.confirm_refresh(p))
+        menu.add_command(label="🗑️ Delete Local Cache", command=lambda p=path: self.show_delete_modal(p))
         menu.add_separator()
         menu.add_command(label="❌ Remove from History", command=lambda p=path: self.remove_from_history(p))
-        menu.tk_popup(event.x_root, event.y_root)    
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
 
-    def show_future_modal(self, folder_name):
-        """Displays the elusive 'Show Me the Future' confirmation dialog."""
-        zarr_path = f"D:/{folder_name}.zarr"
-        if not os.path.exists(zarr_path):
-            messagebox.showinfo(
-                "Temporal Resonance Disruption",
-                f"The future for '{folder_name}' has not coalesced yet.\n\n"
-                "(The GPU shadow pipeline is still computing the volume in the background, or no sync has occurred yet.)"
-            )
-            return
-
-        modal = ctk.CTkToplevel(self)
-        modal.title("Temporal Gateway: Experimental Engine")
-        modal.geometry("520x260")
-        modal.resizable(False, False)
-        modal.grab_set()  # Make window modal
-
-        # Elusive advisory notice
-        title_lbl = ctk.CTkLabel(
-            modal, 
-            text="⚠️ SYSTEM NOTICE: UNCOMMITTED REALITY ⚠️", 
-            font=ctk.CTkFont(size=14, weight="bold"), 
-            text_color="#f39c12"
-        )
-        title_lbl.pack(pady=(18, 8))
-
-        elusive_text = (
-            "You are about to access an uncalibrated, GPU-accelerated volumetric continuum.\n"
-            "This interface bypasses the classical Java-bound fabric in favor of raw out-of-core tensors.\n"
-            "What you observe may be faster, smoother, and fundamentally irreversible.\n\n"
-            "Are you sure you want to continue?"
-        )
-        msg_lbl = ctk.CTkLabel(
-            modal, 
-            text=elusive_text, 
-            font=ctk.CTkFont(size=12), 
-            justify="center", 
-            wraplength=480
-        )
-        msg_lbl.pack(pady=5)
-
-        btn_frame = ctk.CTkFrame(modal, fg_color="transparent")
-        btn_frame.pack(side="bottom", pady=20)
-
-        def on_confirm():
-            modal.destroy()
-            viewer_script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "view_in_napari.py")
-            subprocess.Popen([sys.executable, viewer_script, zarr_path])
-
-        def on_cancel():
-            modal.destroy()
-
-        btn_confirm = ctk.CTkButton(
-            btn_frame, 
-            text="Yes, show me the future", 
-            fg_color="#27ae60", 
-            hover_color="#2ecc71", 
-            text_color="#ffffff",
-            font=ctk.CTkFont(weight="bold"),
-            command=on_confirm
-        )
-        btn_confirm.pack(side="left", padx=12)
-
-        btn_cancel = ctk.CTkButton(
-            btn_frame, 
-            text="No, I don't know what I am doing here", 
-            fg_color="#7f8c8d", 
-            hover_color="#95a5a6", 
-            command=on_cancel
-        )
-        btn_cancel.pack(side="left", padx=12)
-
-    def show_delete_modal(self, folder_name):
-        """Displays the 'Destructive Action' dataset wipe dialog."""
+    def show_delete_modal(self, source_path):
+        project_name, safe_folder_name, _ = self._extract_project_and_folder(source_path)
         modal = ctk.CTkToplevel(self)
         modal.title("Warning: Destructive Action")
-        modal.geometry("520x250")
+        modal.geometry("520x240")
         modal.resizable(False, False)
+        modal.transient(self)
         modal.grab_set()
 
-        warning_title = ctk.CTkLabel(
-            modal, 
-            text="🚨 WARNING: DESTRUCTIVE ACTION 🚨", 
-            font=ctk.CTkFont(size=15, weight="bold"), 
-            text_color="#e74c3c"
-        )
-        warning_title.pack(pady=(18, 6))
+        ctk.CTkLabel(
+            modal, text="🚨 WARNING: DESTRUCTIVE ACTION 🚨",
+            font=ctk.CTkFont(size=15, weight="bold"), text_color="#e74c3c",
+        ).pack(pady=(18, 6))
 
-        warning_body = (
-            "This operation will permanently purge all synchronized image slices, cached mosaics,\n"
-            "and corresponding volumetric Zarr stores for this dataset from the local storage."
-        )
-        msg_lbl = ctk.CTkLabel(
-            modal, 
-            text=warning_body, 
-            font=ctk.CTkFont(size=12), 
-            justify="center", 
-            wraplength=480
-        )
-        msg_lbl.pack(pady=4)
+        ctk.CTkLabel(
+            modal,
+            text="This will purge the synchronized local cache for this dataset on your scratch disk.\n"
+                 "(Original raw data on the NAS is NOT affected.)",
+            font=ctk.CTkFont(size=12), justify="center", wraplength=480,
+        ).pack(pady=4)
 
-        # Dataset name displayed prominently above confirmation button
-        name_lbl = ctk.CTkLabel(
-            modal, 
-            text=f"Dataset: {folder_name}", 
-            font=ctk.CTkFont(size=13, weight="bold"), 
-            text_color="#ecf0f1"
-        )
-        name_lbl.pack(pady=(8, 0))
+        ctk.CTkLabel(
+            modal, text=f"Cached Folder: {safe_folder_name}",
+            font=ctk.CTkFont(size=13, weight="bold"), text_color="#333333",
+        ).pack(pady=(8, 0))
 
         btn_frame = ctk.CTkFrame(modal, fg_color="transparent")
         btn_frame.pack(side="bottom", pady=20)
 
         def on_delete():
             modal.destroy()
-            self.execute_delete_dataset(folder_name)
+            self.execute_delete_dataset(safe_folder_name)
 
-        def on_cancel():
-            modal.destroy()
+        ctk.CTkButton(
+            btn_frame, text="Yes, remove local cache", fg_color="#c0392b", hover_color="#e74c3c",
+            text_color="#ffffff", font=ctk.CTkFont(weight="bold"), command=on_delete,
+        ).pack(side="left", padx=12)
 
-        btn_delete = ctk.CTkButton(
-            btn_frame, 
-            text="Yes, remove this dataset", 
-            fg_color="#c0392b", 
-            hover_color="#e74c3c", 
-            text_color="#ffffff",
-            font=ctk.CTkFont(weight="bold"),
-            command=on_delete
-        )
-        btn_delete.pack(side="left", padx=12)
+        ctk.CTkButton(
+            btn_frame, text="Cancel", fg_color="#7f8c8d", hover_color="#95a5a6", command=modal.destroy,
+        ).pack(side="left", padx=12)
 
-        btn_cancel = ctk.CTkButton(
-            btn_frame, 
-            text="No, I don't know what I am doing here", 
-            fg_color="#7f8c8d", 
-            hover_color="#95a5a6", 
-            command=on_cancel
-        )
-        btn_cancel.pack(side="left", padx=12)
-
-    def execute_delete_dataset(self, folder_name):
-        """Purges local folder and .zarr store."""
-        import shutil
-        target_dir = os.path.join(TARGET_DIR, folder_name)
-        zarr_path = f"D:/{folder_name}.zarr"
-        
-        purged = []
-        if os.path.exists(target_dir):
-            shutil.rmtree(target_dir, ignore_errors=True)
-            purged.append(target_dir)
-            
-        if os.path.exists(zarr_path):
-            shutil.rmtree(zarr_path, ignore_errors=True)
-            purged.append(zarr_path)
+    def execute_delete_dataset(self, safe_folder_name):
+        dest_dir = self.config.get("destination_dir", DESTINATION_DIR)
+        candidates = [
+            os.path.join(get_sync_cache_root(dest_dir), safe_folder_name),
+            os.path.join(dest_dir, safe_folder_name),  # Legacy Alpha root path
+        ]
+        purged = False
+        for target_dir in candidates:
+            if os.path.exists(target_dir):
+                shutil.rmtree(target_dir, ignore_errors=True)
+                purged = True
 
         if purged:
-            self.status.configure(text=f"🗑️ Purged local data for: {folder_name}", text_color="#e74c3c")
-            # Refresh buttons/history UI state
-            self.refresh_ui_lists()
+            self.status.configure(text=f"🗑️ Purged local cache: {safe_folder_name}", text_color="#e74c3c")
+            self.render_nas_buttons()
+            self.render_history_buttons()
         else:
-            self.status.configure(text=f"No local data found on SSD to delete.", text_color="#f39c12")
+            self.status.configure(text="No local cache found on scratch disk to delete.", text_color="#f39c12")
 
-    def confirm_refresh(self, path): # Creates the custom warning pop-up.
-        # Create a custom TopLevel window
+    def confirm_refresh(self, path):
         dialog = ctk.CTkToplevel(self)
         dialog.title("Warning: Destructive Action")
-        dialog.geometry("450x220")
-        dialog.attributes("-topmost", True) # Keep on top of main app
-        dialog.transient(self) # Dim parent window
-        dialog.grab_set() # Force user to click one of the buttons
-        
-        warn_text = ("This action will wipe previous files on this computer and\n"
-                     "re-sync with the latest content with the current folder on NAS.\n\n"
-                     "Are you sure you want to continue?")
-        
-        lbl = ctk.CTkLabel(dialog, text=warn_text, font=("Arial", 12))
-        lbl.pack(pady=(20, 15), padx=20)
-        
-        # The YES button
-        btn_yes = ctk.CTkButton(dialog, text="Yes, wipe and re-sync", 
-                                fg_color="#c0392b", hover_color="#e74c3c", font=("Arial", 12, "bold"),
-                                command=lambda: self.execute_wipe_and_resync(path, dialog))
-        btn_yes.pack(pady=5)
-        
-        # The NO button
-        btn_no = ctk.CTkButton(dialog, text="No, I don't know what I am doing here", 
-                               fg_color="#34495e", hover_color="#2c3e50", font=("Arial", 11),
-                               command=dialog.destroy)
-        btn_no.pack(pady=5)
+        dialog.geometry("460x220")
+        dialog.attributes("-topmost", True)
+        dialog.transient(self)
+        dialog.grab_set()
 
-    def execute_wipe_and_resync(self, source_folder, dialog): # Deletes the local folder and starts a fresh sync.
-        dialog.destroy() # Close the pop-up
-        
-        # 1. Determine exactly what the local folder is named
-        # (This uses the exact same safe naming logic from run_sync)
-        try:
-            path_parts = source_folder.replace("\\", "/").split("/")
-            path_parts = [p for p in path_parts if p]
-            ld_index = -1
-            for i, part in enumerate(path_parts):
-                if "layersdata" in part.lower():
-                    ld_index = i
-                    break
-            project_name = path_parts[ld_index - 1] if ld_index > 0 else "Unknown Project"
-            tile_name = path_parts[-1] 
-            raw_folder_name = f"{project_name}_{tile_name}".replace(" ", "_")
-            safe_folder_name = "".join([c for c in raw_folder_name if c.isalnum() or c in ['_', '-']])
-        except:
-            safe_folder_name = os.path.basename(source_folder).replace(" ", "_")
+        warn_text = (
+            "This action will wipe previous cached files on this computer and\n"
+            "re-sync the latest content from the NAS.\n\n"
+            "Are you sure you want to continue?"
+        )
+        ctk.CTkLabel(dialog, text=warn_text, font=("Segoe UI", 12)).pack(pady=(20, 15), padx=20)
 
-        final_dest = os.path.join(DESTINATION_DIR, safe_folder_name)
+        ctk.CTkButton(
+            dialog, text="Yes, wipe and re-sync",
+            fg_color="#c0392b", hover_color="#e74c3c", font=("Segoe UI", 12, "bold"),
+            command=lambda: self.execute_wipe_and_resync(path, dialog),
+        ).pack(pady=5)
 
-        # 2. THE WIPE
-        if os.path.exists(final_dest):
-            try:
-                self.status.configure(text=f"Wiping local folder: {safe_folder_name}...", text_color="red")
-                self.update()
-                # shutil.rmtree obliterates the folder and everything inside it
-                shutil.rmtree(final_dest) 
-                time.sleep(0.5) # Brief pause so the OS releases the file handles
-            except Exception as e:
-                messagebox.showerror("Wipe Error", f"Could not delete local folder. Ensure no files are open in Fiji.\nError: {e}")
-                return
-                
-        # 3. THE FRESH SYNC
-        # Call the normal sync function now that the destination is gone
+        ctk.CTkButton(
+            dialog, text="Cancel", fg_color="#34495e", hover_color="#2c3e50",
+            font=("Segoe UI", 11), command=dialog.destroy,
+        ).pack(pady=5)
+
+    def execute_wipe_and_resync(self, source_folder, dialog):
+        dialog.destroy()
+        _, safe_folder_name, _ = self._extract_project_and_folder(source_folder)
+        dest_dir = self.config.get("destination_dir", DESTINATION_DIR)
+        for final_dest in [
+            os.path.join(get_sync_cache_root(dest_dir), safe_folder_name),
+            os.path.join(dest_dir, safe_folder_name),
+        ]:
+            if os.path.exists(final_dest):
+                try:
+                    self.status.configure(text=f"Wiping local folder: {safe_folder_name}...", text_color="red")
+                    self.update()
+                    shutil.rmtree(final_dest)
+                    time.sleep(0.3)
+                except Exception as e:
+                    messagebox.showerror(
+                        "Wipe Error",
+                        f"Could not delete local folder. Ensure no files are open in Fiji.\nError: {e}",
+                    )
+                    return
         self.run_sync(source_folder)
 
-# Search & Destroy, just kidding, Search and Detect (Synchronises then Execute)
-    # added lastest modified file awareness in 3 parts (part 1 moved up with the scan for timing)
-    # part 2, the app does a deep scan for the "latest file"
-    def pull_latest(self): # Grabs the absolute newest entry from the indexer cache.
-        cache_path = os.path.join(os.getenv('APPDATA'), "fiji_latest_cache.json")
+    # Pull Latest & Manual Select
+    def pull_latest(self):
+        cache_path = get_cache_file_path()
         if os.path.exists(cache_path):
             try:
-                with open(cache_path, "r") as f:
+                with open(cache_path, "r", encoding="utf-8") as f:
                     data = json.load(f)
-
-                latest_path = None
-                if isinstance(data, dict):
-                    latest_path = data.get("latest_folder")
-                elif isinstance(data, list) and data:
-                    latest_path = data[0].get("path")
-
+                acqs = data.get("acquisitions", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+                if acqs and isinstance(acqs[0], dict):
+                    latest_path = acqs[0].get("path")
+                    if latest_path and os.path.exists(latest_path):
+                        self.run_sync(
+                            latest_path,
+                            acq_type=acqs[0].get("type", "auto"),
+                            rows=acqs[0].get("rows", 1),
+                            cols=acqs[0].get("cols", 1),
+                        )
+                        return
+                latest_path = data.get("latest_folder") if isinstance(data, dict) else None
                 if latest_path and os.path.exists(latest_path):
-                    self.run_sync(latest_path)
+                    self.run_sync(latest_path, acq_type="auto")
                     return
             except Exception as e:
                 print(f"Error reading latest acquisition: {e}")
 
-        # Fallback if cache is missing or path invalid
-        latest = self.get_latest_folder(NAS_DIR)
+        latest = self.get_latest_folder(self.config.get("nas_dir", NAS_DIR))
         if latest:
-            self.run_sync(latest)
+            self.run_sync(latest, acq_type="auto")
         else:
             messagebox.showwarning("Not Found", "Could not detect a valid acquisition.")
 
-    # FallBack for manual selected: reworked for manual selection even when latest folder is detected
     def manual_select(self):
-        source = filedialog.askdirectory(
-            title="Select NAS Folder", initialdir=os.path.join(NAS_DIR, "Maps")
-        )
+        nas_dir = self.config.get("nas_dir", NAS_DIR)
+        maps_dir = os.path.join(nas_dir, "Maps")
+        initial = maps_dir if os.path.exists(maps_dir) else nas_dir
+        source = filedialog.askdirectory(title="Select NAS Folder", initialdir=initial)
         if source:
-            self.run_sync(source)
+            self.run_sync(source, acq_type="auto")
 
-# Sync and Execute
-    # fiji nuclear option
-    def launch_fiji(self, folder_path, project_name="EM_Project", acq_type="z-stack", rows=1, cols=1):
-        try:
-            # 1. PREPARE THE PATH & PAYLOAD
-            formatted_path = folder_path.replace("\\", "/")
-            trigger_path = "D:/fiji_trigger.txt"
+    # Fiji Virtual Stack Launch (Workflow 1: Z-Stack)
+    def launch_fiji_virtual_stack(self, folder_path, project_name="EM_Project"):
+        app_path = self.config.get("app_path", APP_PATH)
+        if not app_path or not os.path.exists(app_path):
+            raise FileNotFoundError(f"Fiji executable not found at: {app_path}\nUpdate it in Settings.")
 
-            payload = f"{formatted_path}|{project_name}|{acq_type}|{rows}|{cols}"
-            with open(trigger_path, "w") as f:
-                f.write(payload)
-            
-            # 2. CHECK IF FIJI IS ACTIVELY RUNNING
-            fiji_active = False
-            for proc in psutil.process_iter(['name']):
-                try:
-                    pname = proc.info['name'].lower()
-                    # Check for main fiji executable
-                    if "fiji-windows-x64" in pname or pname == "fiji.exe":
-                        fiji_active = True
-                        break
-                except (psutil.NoSuchProcess, psutil.AccessDenied):
-                    continue
+        deploy_fiji_watcher(app_path)
+        formatted_path = folder_path.replace("\\", "/")
+        trigger_path = get_trigger_file_path()
+        payload = f"{formatted_path}|{project_name}|z-stack|1|1"
+        with open(trigger_path, "w", encoding="utf-8") as f:
+            f.write(payload)
 
-            # 3. EXECUTION LOGIC
-            if fiji_active:
-                self.status.configure(text="✅ Sync complete. Alerted active Fiji instance.", text_color="#2ecc71")
-            else:
-                self.status.configure(text="Launching fresh Fiji instance...", text_color="#0078d4")
-                self.update()
-                
-                # CRITICAL: Set cwd to Fiji's folder so it can locate its bundled JRE and jars
-                fiji_dir = os.path.dirname(APP_PATH)
-                subprocess.Popen([APP_PATH], cwd=fiji_dir, shell=False)
-
-        except Exception as e:
-            messagebox.showwarning("Trigger Error", f"Sync worked, but couldn't alert Fiji: {e}")
-
-    #def run_sync(self, source_folder): # Core Logic: Compare NAS and SSD, copies missing/different
-    def run_sync(self, source_folder, acq_type="z-stack", rows=1, cols=1):
-        if acq_type == "mosaic-z":
-            messagebox.showwarning(
-                "Workflow Not Supported",
-                "Mosaic Z-Stacks are not currently supported for automated TrakEM2 assembly.\n"
-                "Files will still be copied to SSD, but automated stitching must be configured manually."
-            )    
-        # 1) PATH DECONSTRUCTION & SAFE NAMING
-        try: # psuedo-smart path deconstruction
-            # Standardize slashes and split the path into individual folder names
-            path_parts = source_folder.replace("\\", "/").split("/")
-            path_parts = [p for p in path_parts if p]
-            
-            # Find the exact position of 'LayersData' to orient our breadcrumbs
-            ld_index = -1
-            for i, part in enumerate(path_parts):
-                if "layersdata" in part.lower():
-                    ld_index = i
+        exe_basename = os.path.basename(app_path).lower()
+        fiji_active = False
+        for proc in psutil.process_iter(["name"]):
+            try:
+                pname = (proc.info.get("name") or "").lower()
+                if (
+                    pname == exe_basename
+                    or "fiji-windows-x64" in pname
+                    or "imagej-win64" in pname
+                    or pname == "fiji.exe"
+                ):
+                    fiji_active = True
                     break
-            
-            # Extract names relative to LayersData
-            # Project Name is usually 1 level before LayersData
-            project_name = path_parts[ld_index - 1] if ld_index > 0 else "Unknown Project"
-            # Name of the TileSet is usually the last folder in the string
-            tile_name = path_parts[-1] 
-            
-            # Create the UI display string (e.g., "Project_A ➔ Tile_01")
-            display_title = f"{project_name} ➔ {tile_name}"
-            
-            # Create a safe folder name combining project and tile to prevent mixed stacks in Fiji
-            # E.g., it turns "HL_0203 humanCell" into "HL_0203_humanCell_Tile_01"
-            raw_folder_name = f"{project_name}_{tile_name}".replace(" ", "_")
-            # Keep only alphanumeric characters, underscores, and hyphens to avoid Windows path errors
-            safe_folder_name = "".join([c for c in raw_folder_name if c.isalnum() or c in ['_', '-']])
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
 
-        except:
-            # Fallback if the path doesn't match the expected LayersData/Layer structure
-            display_title = os.path.basename(source_folder)
-            safe_folder_name = display_title.replace(" ", "_")
+        if fiji_active:
+            self.after(0, lambda: self.status.configure(
+                text="✅ Z-Stack synced. Alerted active Fiji instance (Virtual Stack).", text_color="#2ecc71"
+            ))
+        else:
+            self.after(0, lambda: self.status.configure(
+                text="✅ Z-Stack synced. Launching Fiji (Virtual Stack)...", text_color="#0078d4"
+            ))
+            fiji_dir = os.path.dirname(os.path.abspath(app_path))
+            kwargs = {"cwd": fiji_dir, "shell": False, "close_fds": True}
+            if sys.platform == "win32":
+                kwargs["creationflags"] = 0x00000008 | 0x00000200
+            subprocess.Popen([app_path], **kwargs)
 
-        # 2) UPDATE UI LABELS & DESTINATION
-        # Update the UI to show the user exactly what is currently syncing
-        self.latest_path_label.configure(text=f"Syncing: {display_title}", text_color="#3498db")
-        
-        # Define the final destination using our new safe, unique folder name
-        final_dest = os.path.join(DESTINATION_DIR, safe_folder_name)
+    # Core Sync + Alignment Orchestrator
+    def _set_action_buttons_state(self, state):
+        all_action_buttons = (
+            self.history_buttons
+            + self.nas_buttons
+            + self.all_buttons
+            + [self.btn_manual, self.btn_latest, self.btn_settings]
+        )
+        for b in all_action_buttons:
+            try:
+                b.configure(state=state)
+            except Exception:
+                pass
+
+    def run_sync(self, source_folder, acq_type="auto", rows=1, cols=1):
+        if self._is_busy:
+            return
+        if not os.path.exists(source_folder):
+            messagebox.showerror("Source Not Found", f"Source folder does not exist:\n{source_folder}")
+            return
+
+        self._is_busy = True
+        self._set_action_buttons_state("disabled")
+        self.progress.set(0)
+
+        worker = threading.Thread(
+            target=self._sync_and_process_worker,
+            args=(source_folder, acq_type, rows, cols),
+            daemon=True,
+        )
+        worker.start()
+
+    def _sync_and_process_worker(self, source_folder, acq_type, rows, cols):
+        project_name, safe_folder_name, display_title = self._extract_project_and_folder(source_folder)
+        dest_root = get_sync_cache_root(self.config.get("destination_dir", DESTINATION_DIR))
+        final_dest = os.path.join(dest_root, safe_folder_name)
 
         try:
-            # Disable inputs during sync to prevent user from clicking twice and causing overlapping syncs
-            all_action_buttons = (
-                self.history_buttons + 
-                self.nas_buttons + 
-                self.all_buttons + 
-                [self.btn_manual, self.btn_latest]
-            )
-            for b in all_action_buttons:
-                b.configure(state="disabled")
+            self.after(0, lambda: self.latest_path_label.configure(
+                text=f"Syncing: {display_title}", text_color="#3498db"
+            ))
+            self.after(0, lambda: self.status.configure(text="Scanning source .tif files...", text_color="#333333"))
 
-            # Let user know we are starting the analysis phase
-            self.status.configure(text="Analyzing files for changes...")
-            self.update()
-
-            # Create destination directory on the SSD if it doesn't exist yet
             os.makedirs(final_dest, exist_ok=True)
-            
-            # Gather all files from the source folder recursively to calculate total progress
-            # Updated to only collect files ending with .tif
+
             all_files = []
-            for root, dirs, files in os.walk(source_folder):
-                for file in files:
-                    if file.lower().endswith(".tif"):
-                        all_files.append(os.path.join(root, file))
-            
+            for root, _, files in os.walk(source_folder):
+                for fname in files:
+                    if fname.lower().endswith((".tif", ".tiff")):
+                        all_files.append(os.path.join(root, fname))
+
             total_files = len(all_files)
-            
             if total_files == 0:
-                messagebox.showinfo("No Images Found", "This folder contains no .tif files.")
+                self.after(0, lambda: messagebox.showinfo("No Images Found", "This folder contains no .tif/.tiff files."))
                 return
 
-            # Initialise tracking counters for the UI
+            # Auto-detect acquisition type when invoked manually or via fallback
+            if acq_type in (None, "", "auto"):
+                detected = detect_acquisition_type([os.path.basename(f) for f in all_files])
+                acq_type = detected["type"]
+                rows = detected["rows"]
+                cols = detected["cols"]
+
             files_processed = 0
             files_skipped = 0
             files_copied = 0
+            t_sync_start = time.time()
 
-            # 3) SMART SYNC LOGIC
-            for i, s_file in enumerate(all_files):
-                # Calculate the relative path of the file to maintain exact folder structure inside the destination
+            for s_file in all_files:
                 rel = os.path.relpath(s_file, source_folder)
                 d_file = os.path.join(final_dest, rel)
-                
-                # Ensure the sub-directory exists in the destination before attempting to copy
                 os.makedirs(os.path.dirname(d_file), exist_ok=True)
 
-                should_copy = True # Default assumption is that we need to copy the file
-                
-                # If the file already exists on the SSD, check its metadata to see if we can skip it
+                should_copy = True
                 if os.path.exists(d_file):
-                    s_stat = os.stat(s_file) # Source file stats (NAS)
-                    d_stat = os.stat(d_file) # Destination file stats (SSD)
-                    
-                    # If both size AND modification time are identical, the file hasn't changed. Skip it.
-                    if s_stat.st_size == d_stat.st_size and s_stat.st_mtime == d_stat.st_mtime:
+                    s_stat = os.stat(s_file)
+                    d_stat = os.stat(d_file)
+                    if s_stat.st_size == d_stat.st_size and abs(s_stat.st_mtime - d_stat.st_mtime) < 1e-3:
                         should_copy = False
-                
-                # Execute the copy or skip
+
                 if should_copy:
-                    # shutil.copy2 is critical here: it copies the file AND preserves its original timestamp
                     shutil.copy2(s_file, d_file)
                     files_copied += 1
                 else:
                     files_skipped += 1
 
-                # 4) PROGRESS UPDATES
                 files_processed += 1
-                self.progress.set(files_processed / total_files) # Update progress bar (0.0 to 1.0)
-                
-                # Update status text with live counters so user knows it hasn't frozen
-                self.status.configure(
-                    text=f"Progress: {files_processed}/{total_files} | Copied: {files_copied} | Skipped: {files_skipped}"
-                )
-                
-                # Update UI periodically (every 5 files) to keep it responsive but maintain high transfer speeds
-                if files_processed % 5 == 0:
-                    self.update()
+                if files_processed % 5 == 0 or files_processed == total_files:
+                    frac = files_processed / float(total_files)
+                    elapsed = time.time() - t_sync_start
+                    eta = (elapsed / files_processed) * (total_files - files_processed)
+                    msg = (
+                        f"[Sync] {files_processed}/{total_files} ({frac * 100:.1f}%) | "
+                        f"Copied: {files_copied}, Skipped: {files_skipped} | "
+                        f"Elapsed: {format_duration(elapsed)} | Remaining: {format_duration(eta)}"
+                    )
+                    self.after(0, lambda f=frac, m=msg: (
+                        self.progress.set(f),
+                        self.status.configure(text=m, text_color="#333333"),
+                    ))
 
-            # 5) COMPLETION & HANDOFF
-            # Save this successful run to the history JSON
-            self.save_history(source_folder)
-            
-            # Stamp the completion time on the UI so user knows how fresh the data is
-            timestamp = time.strftime("%H:%M")
-            self.latest_path_label.configure(text=f"Last Sync: {display_title} [{timestamp}]", text_color="green")
-            self.status.configure(
-                text=f"Success! {files_copied} new, {files_skipped} already on SSD.", 
-                text_color="green"
+            self.after(0, lambda: self.save_history(source_folder))
+
+            # WORKFLOW 1: Simple Z-Stack -> Fiji Virtual Stack
+            if acq_type == "z-stack":
+                self.launch_fiji_virtual_stack(final_dest, project_name=project_name)
+                stamp = time.strftime("%H:%M")
+                self.after(0, lambda: self.latest_path_label.configure(
+                    text=f"Last Sync (Z-Stack): {display_title} [{stamp}]", text_color="#2ecc71"
+                ))
+                return
+
+            # WORKFLOW 2: Mosaic / Mosaic Z-Stack -> PyTorch Aligner -> TrakEM2 XML -> Fiji
+            self.after(0, lambda: (
+                self.progress.set(0.02),
+                self.latest_path_label.configure(
+                    text=f"Aligning ({acq_type}, {rows}x{cols}): {display_title}", text_color="#8e44ad"
+                ),
+                self.status.configure(text="Starting BioEM PyTorch Aligner...", text_color="#333333"),
+            ))
+
+            from bioem_torch_align import run_pipeline
+
+            def on_align_progress(info):
+                frac = info.get("progress", 0.0)
+                msg = info.get("message", "Aligning...")
+                self.after(0, lambda f=frac, m=msg: (
+                    self.progress.set(f),
+                    self.status.configure(text=m, text_color="#333333"),
+                ))
+
+            xml_path = run_pipeline(
+                target_dir=final_dest,
+                project_name=project_name,
+                rows=rows,
+                cols=cols,
+                mode=acq_type,
+                overlap_pct=float(self.config.get("overlap_pct", 10.0)),
+                fiji_exe=self.config.get("app_path", APP_PATH),
+                open_fiji=True,
+                progress_callback=on_align_progress,
             )
-            
-            # Hand the final combined folder over to Fiji
-            #self.launch_fiji(final_dest)
-            # Pass the extracted project name and parameters to Fiji
-            self.launch_fiji(final_dest, project_name=project_name, acq_type=acq_type, rows=rows, cols=cols)
 
-            # 6) SHADOW PIPELINE: Parallel headless GPU background processing
-            self.launch_gpu_shadow(final_dest, project_name=project_name, rows=rows, cols=cols)
+            stamp = time.strftime("%H:%M")
+            self.after(0, lambda: (
+                self.progress.set(1.0),
+                self.status.configure(text=f"✅ Aligned & opened in Fiji: {os.path.basename(xml_path)}", text_color="#2ecc71"),
+                self.latest_path_label.configure(text=f"Completed: {display_title} [{stamp}]", text_color="#2ecc71"),
+            ))
 
-        except Exception as e:
-            # Catch any unexpected network/file errors and show them to the user
-            messagebox.showerror("Sync Error", str(e))
+        except Exception as exc:
+            err_msg = str(exc)
+            self.after(0, lambda m=err_msg: (
+                self.status.configure(text=f"Error: {m}", text_color="#e74c3c"),
+                messagebox.showerror("Sync / Alignment Error", m),
+            ))
         finally:
-            # No matter what happens (success or error), always re-enable the buttons!
-            all_action_buttons = (
-                self.history_buttons + 
-                self.nas_buttons + 
-                self.all_buttons + 
-                [self.btn_manual, self.btn_latest]
-            )
-            for b in all_action_buttons:
-                b.configure(state="normal")
+            self._is_busy = False
+            self.after(0, lambda: self._set_action_buttons_state("normal"))
 
-# THE ON SWITCH 
+
 if __name__ == "__main__":
-    # Ensure the local D:/ drive or folder exists
-    if not os.path.exists(DESTINATION_DIR):
-        try:
-            os.makedirs(DESTINATION_DIR)
-        except Exception:
-            pass # Drive might not be writable yet
-            
     app = NASPuller()
     app.mainloop()

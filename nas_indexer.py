@@ -3,11 +3,15 @@ import time
 import json
 import re
 
+from bioem_config import (
+    get_app_data_dir,
+    get_cache_file_path,
+    load_config,
+    INDEXER_PID_FILENAME,
+)
+
 # CONFIGURATION
-NAS_DIR = "I:/"
-CACHE_FILE = os.path.join(os.getenv('APPDATA'), "fiji_latest_cache.json")
-SCAN_INTERVAL = 5 # changed scan interval to 5 seconds
-#
+SCAN_INTERVAL = 5  # seconds between NAS scans
 
 # Matches 'Tile' followed by 3 coordinate numbers regardless of '-' or '_' delimiters
 TILE_PATTERN = re.compile(r"Tile[_-](\d+)[_-](\d+)[_-](\d+)", re.IGNORECASE)
@@ -104,32 +108,64 @@ def get_all_acquisitions(base_path):
         print(f"❌ Scan error: {e}")
         return []
 
-if __name__ == "__main__":
+def run_indexer_loop(stop_event=None):
+    """Runs the background NAS acquisition crawler loop, reloading config on each scan."""
     print("===========================================")
     print("   BIO-EM NAS INDEXER SERVICE (ALL DATA)   ")
     print("===========================================")
-    
-    while True:
-        start_time = time.time()
-        results = get_all_acquisitions(NAS_DIR)
-        
-        if results:
-            payload = {
-                "latest_folder": results[0]["path"],
-                "timestamp": time.time(),
-                "acquisitions": results
-            }
-            try:
-                temp_cache = CACHE_FILE + ".tmp"
-                with open(temp_cache, "w") as f:
-                    json.dump(payload, f, indent=4)
-                os.replace(temp_cache, CACHE_FILE)
-                
-                elapsed = round(time.time() - start_time, 2)
-                print(f"[{time.strftime('%H:%M:%S')}] Cache updated: {len(results)} items (Took {elapsed}s).")
-            except Exception as e:
-                print(f"❌ Cache Write Error: {e}")
-        else:
-            print(f"[{time.strftime('%H:%M:%S')}] Scan completed: No valid acquisitions found.")
-            
-        time.sleep(SCAN_INTERVAL)
+
+    pid_file = os.path.join(get_app_data_dir(), INDEXER_PID_FILENAME)
+    try:
+        with open(pid_file, "w", encoding="utf-8") as f:
+            f.write(str(os.getpid()))
+    except Exception:
+        pass
+
+    try:
+        while stop_event is None or not stop_event.is_set():
+            cfg = load_config()
+            nas_dir = cfg.get("nas_dir", "I:/")
+            cache_file = get_cache_file_path()
+
+            start_time = time.time()
+            results = get_all_acquisitions(nas_dir)
+
+            if results:
+                payload = {
+                    "latest_folder": results[0]["path"],
+                    "timestamp": time.time(),
+                    "acquisitions": results,
+                }
+                try:
+                    temp_cache = cache_file + ".tmp"
+                    with open(temp_cache, "w", encoding="utf-8") as f:
+                        json.dump(payload, f, indent=4)
+                    os.replace(temp_cache, cache_file)
+
+                    elapsed = round(time.time() - start_time, 2)
+                    print(
+                        f"[{time.strftime('%H:%M:%S')}] Cache updated: {len(results)} items from {nas_dir} (Took {elapsed}s)."
+                    )
+                except Exception as e:
+                    print(f"❌ Cache Write Error: {e}")
+            else:
+                print(
+                    f"[{time.strftime('%H:%M:%S')}] Scan completed ({nas_dir}): No valid acquisitions found."
+                )
+
+            if stop_event is not None:
+                stop_event.wait(SCAN_INTERVAL)
+            else:
+                time.sleep(SCAN_INTERVAL)
+    finally:
+        try:
+            if os.path.exists(pid_file):
+                with open(pid_file, "r", encoding="utf-8") as f:
+                    if f.read().strip() == str(os.getpid()):
+                        os.remove(pid_file)
+        except Exception:
+            pass
+
+
+if __name__ == "__main__":
+    run_indexer_loop()

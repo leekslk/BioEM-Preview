@@ -1,9 +1,9 @@
-cat << 'EOF' > .gitignore
 BioEM-preview/
 .venv/
 __pycache__/
 *.py[cod]
 *.spec
+!Preview_beta.spec
 build/
 dist/
 .DS_Store
@@ -15,4 +15,4 @@ dist/
 *.zarr/
 *.json
 *trigger.txt
-EOF
+*.pid
