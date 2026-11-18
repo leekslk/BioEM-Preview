@@ -99,7 +99,7 @@ https://github.com/user-attachments/assets/1d0c0cb1-a22a-404d-a16f-fb01e48e392c
 #### 4. Export Portable Data Package
 Right-click a synchronized and aligned dataset (e.g., an aligned `Z-Stack` or `Mosaic Z-Stack`), select **📦 Export Data Package**, choose a target directory, and inspect the generated self-contained folder (`<DatasetName>.xml`, `images/`, `trakem2.*` mipmaps, and saved alignment log).
 
-> _Demo slot (`docs/media/demo_4_export_package.gif` or drag-and-drop `.mp4` in GitHub editor)_
+https://github.com/user-attachments/assets/9d91f4f9-c5a2-478b-b2f2-ac7db675d4d2
 
 ## Roadmap
 * **Interactive Preview & Manual Alignment Correction:** Visual preview allowing users to inspect and manually adjust tricky slice/tile alignments that cannot be solved purely mathematically.
