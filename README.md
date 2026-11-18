@@ -84,7 +84,7 @@ Once complete, extract `dist\Preview_beta-YYYYMMMDD.zip` and copy its contents (
 #### 1. Z-Stack: Delta Sync & Display in Fiji (Virtual Stack)
 Click any `Z-Stack` acquisition to delta-sync `.tif` slices into `D:\<DatasetName>\`, automatically inspect FEI `DigitalContrast` metadata, and display as a Virtual Stack in Fiji.
 
-> _Demo slot (`docs/media/demo_1_zstack_virtual.gif` or drag-and-drop `.mp4` in GitHub editor)_
+https://github.com/user-attachments/assets/1aa24e65-4b3c-42e8-9dc8-9fbea3e142d8
 
 #### 2. Z-Stack: Right-Click → Align and Display (TrakEM2)
 Right-click a `Z-Stack`, choose **📐 Align and Display** to run PyTorch rigid Z-alignment (Pass 2) + TrakEM2 `.xml` generation inside `D:\<DatasetName>\`, and open in TrakEM2.
