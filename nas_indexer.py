@@ -41,7 +41,7 @@ def detect_acquisition_type(filenames):
             spatial_coords.add((d1, d2))
 
     if not dim1_set or not dim2_set:
-        return {"type": "z-stack", "rows": 1, "cols": 1}
+        return {"type": "z-stack", "rows": 1, "cols": 1, "z_slices": len(filenames)}
 
     # Use max() to represent true grid dimensions for TrakEM2 even during active acquisitions
     rows = max(dim1_set)
@@ -50,16 +50,16 @@ def detect_acquisition_type(filenames):
     num_spatial_tiles = len(spatial_coords)
     num_z_slices = len(z_set)
 
-    # 1. Multi-tile grid AND multi-slice Z -> Mosaic Z-Stack (Unsupported)
+    # 1. Multi-tile grid AND multi-slice Z -> Mosaic Z-Stack
     if num_spatial_tiles > 1 and num_z_slices > 1:
-        return {"type": "mosaic-z", "rows": rows, "cols": cols}
+        return {"type": "mosaic-z", "rows": rows, "cols": cols, "z_slices": num_z_slices}
 
-    # 2. Multi-tile grid AND single Z -> Pure 2D Mosaic (TrakEM2)
+    # 2. Multi-tile grid AND single Z -> Pure 2D Mosaic
     if num_spatial_tiles > 1:
-        return {"type": "mosaic", "rows": rows, "cols": cols}
+        return {"type": "mosaic", "rows": rows, "cols": cols, "z_slices": num_z_slices}
 
     # 3. Single spatial tile position -> Standard Z-Stack
-    return {"type": "z-stack", "rows": 1, "cols": 1}
+    return {"type": "z-stack", "rows": 1, "cols": 1, "z_slices": num_z_slices}
 
 def get_all_acquisitions(base_path):
     search_root = os.path.join(base_path, "Maps") if os.path.exists(os.path.join(base_path, "Maps")) else base_path
@@ -97,7 +97,8 @@ def get_all_acquisitions(base_path):
                 "mtime": data[0],
                 "type": data[1]["type"],
                 "rows": data[1]["rows"],
-                "cols": data[1]["cols"]
+                "cols": data[1]["cols"],
+                "z_slices": data[1].get("z_slices", 1),
             }
             for p, data in found_folders.items()
         ]

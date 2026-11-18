@@ -761,23 +761,21 @@ class NASPuller(ctk.CTk):
         except Exception:
             return f"{prefix} {os.path.basename(path)}"
 
-    def _create_badge_and_button(self, parent_container, item_path, acq_type="z-stack", rows=1, cols=1, prefix="📡", is_history=False):
+    def _create_badge_and_button(self, parent_container, item_path, acq_type="z-stack", rows=1, cols=1, z_slices=0, prefix="📡", is_history=False):
         btn_text = self.format_breadcrumb(item_path, prefix=prefix)
         row_frame = ctk.CTkFrame(parent_container, fg_color="transparent")
         row_frame.pack(fill="x", padx=30, pady=3)
 
+        badge_width = 155
         if acq_type == "mosaic-z":
-            badge_text = f"Mosaic Z ({rows}x{cols})"
+            badge_text = f"Mosaic Z ({rows}x{cols}, z={z_slices})" if z_slices else f"Mosaic Z ({rows}x{cols})"
             badge_bg = "#8e44ad"  # Fluent Purple
-            badge_width = 115
         elif acq_type == "mosaic":
             badge_text = f"Mosaic ({rows}x{cols})"
             badge_bg = "#e67e22"  # Fluent Orange
-            badge_width = 115
         else:
             badge_text = "Z-Stack"
             badge_bg = "#2ecc71"  # Fluent Green
-            badge_width = 115
 
         ctk.CTkLabel(
             row_frame,
@@ -845,31 +843,23 @@ class NASPuller(ctk.CTk):
                 nas_items = acquisitions[:split_index]
                 all_items = acquisitions[split_index:]
 
-                for item in nas_items:
-                    path = item.get("path") if isinstance(item, dict) else item
-                    if not path:
-                        continue
-                    acq_type = item.get("type", "z-stack") if isinstance(item, dict) else "z-stack"
-                    rows = item.get("rows", 1) if isinstance(item, dict) else 1
-                    cols = item.get("cols", 1) if isinstance(item, dict) else 1
-                    row_frame, btn = self._create_badge_and_button(
-                        self.nas_card, path, acq_type=acq_type, rows=rows, cols=cols, prefix="📡", is_history=False
-                    )
-                    self.nas_rows.append(row_frame)
-                    self.nas_buttons.append(btn)
-
-                for item in all_items:
-                    path = item.get("path") if isinstance(item, dict) else item
-                    if not path:
-                        continue
-                    acq_type = item.get("type", "z-stack") if isinstance(item, dict) else "z-stack"
-                    rows = item.get("rows", 1) if isinstance(item, dict) else 1
-                    cols = item.get("cols", 1) if isinstance(item, dict) else 1
-                    row_frame, btn = self._create_badge_and_button(
-                        self.all_card, path, acq_type=acq_type, rows=rows, cols=cols, prefix="📁", is_history=False
-                    )
-                    self.all_rows.append(row_frame)
-                    self.all_buttons.append(btn)
+                for container, items, prefix, rows_list, btns_list in [
+                    (self.nas_card, nas_items, "📡", self.nas_rows, self.nas_buttons),
+                    (self.all_card, all_items, "📁", self.all_rows, self.all_buttons),
+                ]:
+                    for item in items:
+                        path = item.get("path") if isinstance(item, dict) else item
+                        if not path:
+                            continue
+                        acq_type = item.get("type", "z-stack") if isinstance(item, dict) else "z-stack"
+                        rows = item.get("rows", 1) if isinstance(item, dict) else 1
+                        cols = item.get("cols", 1) if isinstance(item, dict) else 1
+                        z_slices = item.get("z_slices", 0) if isinstance(item, dict) else 0
+                        row_frame, btn = self._create_badge_and_button(
+                            container, path, acq_type=acq_type, rows=rows, cols=cols, z_slices=z_slices, prefix=prefix, is_history=False
+                        )
+                        rows_list.append(row_frame)
+                        btns_list.append(btn)
             except Exception as e:
                 print(f"Error rendering NAS buttons: {e}")
 
@@ -905,6 +895,7 @@ class NASPuller(ctk.CTk):
                 acq_type=item_meta.get("type", "z-stack"),
                 rows=item_meta.get("rows", 1),
                 cols=item_meta.get("cols", 1),
+                z_slices=item_meta.get("z_slices", 0),
                 prefix="🕒",
                 is_history=True,
             )
