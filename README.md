@@ -10,7 +10,7 @@ Moving large SBF-SEM tile streams across the network and configuring alignment p
 * Reads FEI/Thermo Fisher `DigitalContrast` TIFF metadata on the first tile so display inversion is applied only when needed.
 * Routes each dataset automatically:
   * **Single-Tile Z-Stacks:** Opens in Fiji as a virtual stack (applying `Invert LUT` automatically only for uninverted acquisitions), with an optional right-click **Align and Display** action for Z-alignment.
-  * **2D Mosaics & Mosaic Z-Stacks:** Runs fast PyTorch GPU/CPU alignment with live elapsed/remaining time progress, saves a TrakEM2 `.xml` project on your Desktop, and opens it in Fiji.
+  * **2D Mosaics & Mosaic Z-Stacks:** Runs fast PyTorch GPU/CPU alignment with live elapsed/remaining time progress, saves the TrakEM2 `.xml` project and mipmap folder directly inside your synced dataset folder (`<DESTINATION_DIR>\<DatasetName>\`), and opens it in Fiji.
 
 *Too Long Didn't Read | TLDR:*
 * *Install and run the app, complete the quick First-Run Setup once, and click any dataset.*
@@ -76,11 +76,32 @@ Once complete, extract `dist\Preview_beta-YYYYMMMDD.zip` and copy its contents (
 ## Usage
 1. Open **BioEM Preview** from your Desktop shortcut (the background crawler runs automatically).
 2. Click any acquisition under **Available on NAS** (or use **Pull Latest Acquisition** / **Manually Select Folder**), or right-click any entry for contextual actions (**Show Folder**, **Align and Display**, **Export Data Package**, **Refresh**, **Delete Local Cache**).
-3. Watch the progress bar (and optional **Logs** sidebar) for delta sync, FEI contrast LUT check, and alignment passes with elapsed and remaining time.
-4. Fiji opens automatically with either your virtual Z-stack or your aligned TrakEM2 `.xml` project.
+3. Watch the progress bar (and toggle the **Logs** sidebar) for delta sync, FEI contrast LUT detection, and alignment passes with elapsed and remaining time.
+4. Fiji opens automatically with either your virtual Z-stack or your aligned TrakEM2 `.xml` project stored inside `<DESTINATION_DIR>\<DatasetName>\`.
+
+### Workflow Demonstrations
+
+#### 1. Z-Stack: Delta Sync & Display in Fiji (Virtual Stack)
+Click any `Z-Stack` acquisition to delta-sync `.tif` slices into `D:\<DatasetName>\`, automatically inspect FEI `DigitalContrast` metadata, and display as a Virtual Stack in Fiji.
+
+> _Demo slot (`docs/media/demo_1_zstack_virtual.gif` or drag-and-drop `.mp4` in GitHub editor)_
+
+#### 2. Z-Stack: Right-Click → Align and Display (TrakEM2)
+Right-click a `Z-Stack`, choose **📐 Align and Display** to run PyTorch rigid Z-alignment (Pass 2) + TrakEM2 `.xml` generation inside `D:\<DatasetName>\`, and open in TrakEM2.
+
+> _Demo slot (`docs/media/demo_2_zstack_align.gif` or drag-and-drop `.mp4` in GitHub editor)_
+
+#### 3. Mosaic Z-Stack Alignment & Extended Logs Sidebar
+Click a `Mosaic Z` dataset to run 2D stitching (Pass 1) and sequential Z-alignment (Pass 2) while expanding the right-hand **Logs** panel to monitor per-pass elapsed/remaining times and LUT detection.
+
+> _Demo slot (`docs/media/demo_3_mosaic_z_logs.gif` or drag-and-drop `.mp4` in GitHub editor)_
+
+#### 4. Export Portable Data Package
+Right-click a synchronized and aligned dataset (e.g., an aligned `Z-Stack` or `Mosaic Z-Stack`), select **📦 Export Data Package**, choose a target directory, and inspect the generated self-contained folder (`<DatasetName>.xml`, `images/`, `trakem2.*` mipmaps, and saved alignment log).
+
+> _Demo slot (`docs/media/demo_4_export_package.gif` or drag-and-drop `.mp4` in GitHub editor)_
 
 ## Roadmap
-* **Relocate TrakEM2 Working Folder into Scratch Data Directory (`D:/`) & Clean Up Temp Folders:** Consolidate temporary TrakEM2 `.xml` / mipmap workspaces out of the Desktop directly inside the data folder (`<DESTINATION_DIR>` / `D:/`) and automatically clean up temporary TrakEM2 artifacts in the next revision.
 * **Interactive Preview & Manual Alignment Correction:** Visual preview allowing users to inspect and manually adjust tricky slice/tile alignments that cannot be solved purely mathematically.
 * **Slimmer GPU Distribution:** Trimming unused CUDA runtime libraries so GPU-accelerated builds fit comfortably within GitHub's 2 GB release asset limit.
 * **OME-Zarr / Out-of-Core Viewing:** Optional chunked pyramidal export and interactive 3D inspection.

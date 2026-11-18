@@ -1278,10 +1278,12 @@ class NASPuller(ctk.CTk):
                 return True
             if safe_folder_name and (f"/{safe_folder_name.lower()}/") in text_lower:
                 return True
-            # Also match relative export-style XML referencing images already inside synced_dir
+            # Also match relative XML referencing images inside synced_dir
             m = re.search(r'<t2_patch[^>]*\bfile_path\s*=\s*"([^"]+)"', text)
             if m:
-                sample_fp = html.unescape(m.group(1)).replace("\\", "/")
+                sample_fp = html.unescape(m.group(1)).replace("\\", "/").lstrip("./")
+                if sample_fp and os.path.exists(os.path.join(synced_dir, sample_fp)):
+                    return True
                 sample_name = os.path.basename(sample_fp)
                 if sample_name and os.path.exists(os.path.join(synced_dir, sample_name)):
                     return True
@@ -1437,12 +1439,18 @@ class NASPuller(ctk.CTk):
                     log_path = cand_log
 
         if not xml_path:
-            desktop_xml = os.path.join(os.path.expanduser("~"), "Desktop", project_name, f"{project_name}.xml")
-            if os.path.isfile(desktop_xml) and self._xml_references_synced_dir(desktop_xml, synced_dir, safe_folder_name):
-                xml_path = desktop_xml
-                cand_log = get_dataset_log_path(safe_folder_name)
-                if os.path.isfile(cand_log):
-                    log_path = cand_log
+            fallback_candidates = [
+                os.path.join(synced_dir, f"{safe_folder_name}.xml"),
+                os.path.join(synced_dir, f"{project_name}.xml"),
+                os.path.join(os.path.expanduser("~"), "Desktop", project_name, f"{project_name}.xml"),
+            ]
+            for cand_xml in fallback_candidates:
+                if os.path.isfile(cand_xml) and self._xml_references_synced_dir(cand_xml, synced_dir, safe_folder_name):
+                    xml_path = cand_xml
+                    cand_log = get_dataset_log_path(safe_folder_name)
+                    if os.path.isfile(cand_log):
+                        log_path = cand_log
+                    break
 
         if not xml_path:
             return None
@@ -2067,7 +2075,7 @@ class NASPuller(ctk.CTk):
             xml_path = run_align_subprocess(
                 python_exe=engine_python,
                 target_dir=final_dest,
-                project_name=project_name,
+                project_name=safe_folder_name,
                 rows=rows,
                 cols=cols,
                 mode=acq_type,

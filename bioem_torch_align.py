@@ -5,6 +5,7 @@ import time
 import math
 import json
 import random
+import shutil
 import argparse
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
@@ -649,8 +650,19 @@ def detect_lut_inversion_from_fei(first_path, fei_meta=None, photometric=None):
 
 
 def write_trakem2_xml(xml_path, layer_records, tile_w, tile_h, is_16bit, invert_lut=False):
-    out_dir = os.path.dirname(xml_path)
+    out_dir = os.path.dirname(os.path.abspath(xml_path))
     proj_title = os.path.splitext(os.path.basename(xml_path))[0]
+
+    # Clean up any stale prior trakem2.<unuid> mipmap folders in out_dir so re-alignments stay tidy
+    try:
+        for entry in os.listdir(out_dir):
+            if entry.startswith("trakem2."):
+                stale_dir = os.path.join(out_dir, entry)
+                if os.path.isdir(stale_dir):
+                    shutil.rmtree(stale_dir, ignore_errors=True)
+    except Exception:
+        pass
+
     unuid = "%d.%d.%d" % (
         int(time.time() * 1000),
         random.randint(100000000, 999999999),
@@ -867,6 +879,15 @@ def write_trakem2_xml(xml_path, layer_records, tile_w, tile_h, is_16bit, invert_
                 mat_str = "matrix(%.6f,%.6f,%.6f,%.6f,%.3f,%.3f)" % (
                     m00, m10, m01, m11, tx_norm, ty_norm)
                 fname = os.path.basename(p["path"])
+                try:
+                    abs_out = os.path.abspath(out_dir)
+                    abs_img = os.path.abspath(p["path"])
+                    if os.path.commonpath([abs_out, abs_img]) == abs_out:
+                        patch_fp = os.path.relpath(abs_img, abs_out).replace("\\", "/")
+                    else:
+                        patch_fp = p["path"]
+                except Exception:
+                    patch_fp = p["path"]
 
                 f.write(
                     '\t\t\t<t2_patch oid="%d" width="%.1f" height="%.1f" transform="%s" '
@@ -874,7 +895,7 @@ def write_trakem2_xml(xml_path, layer_records, tile_w, tile_h, is_16bit, invert_
                     'o_width="%d" o_height="%d" min="0.0" max="%s" mres="32" ct_id="0" alpha_mask_id="0" />\n' % (
                         patch_id, float(tile_w), float(tile_h), mat_str,
                         xml_escape(fname, {'"': '&quot;'}),
-                        patch_type, xml_escape(p["path"], {'"': '&quot;'}),
+                        patch_type, xml_escape(patch_fp, {'"': '&quot;'}),
                         tile_w, tile_h, max_val
                     )
                 )
@@ -926,11 +947,7 @@ def run_pipeline(
 
     t_start = time.time()
     target_dir = target_dir.replace("\\", "/")
-    out_dir = (
-        output_dir.replace("\\", "/")
-        if output_dir
-        else os.path.join(os.path.expanduser("~"), "Desktop", project_name).replace("\\", "/")
-    )
+    out_dir = output_dir.replace("\\", "/") if output_dir else target_dir
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
     xml_path = os.path.join(out_dir, project_name + ".xml").replace("\\", "/")

@@ -377,7 +377,5 @@ def run_align_subprocess(
         )
 
     if not xml_path:
-        xml_path = os.path.join(
-            os.path.expanduser("~"), "Desktop", project_name, f"{project_name}.xml"
-        ).replace("\\", "/")
+        xml_path = os.path.join(target_dir, f"{project_name}.xml").replace("\\", "/")
     return xml_path
