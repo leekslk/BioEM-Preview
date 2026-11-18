@@ -607,7 +607,48 @@ def align_z_pair_rigid(ref_tiles, ref_pos_2d, mov_tiles, mov_pos_2d, tile_w, til
 # 
 # (5) Direct Native TrakEM2 XML Writer (Java 8 Fiji Ready)
 # 
-def write_trakem2_xml(xml_path, layer_records, tile_w, tile_h, is_16bit):
+def detect_lut_inversion_from_fei(first_path, fei_meta=None, photometric=None):
+    """
+    Determines whether TrakEM2 display LUT inversion should be enabled from the first TIFF's
+    FEI metadata (`Image.DigitalContrast`) or PhotometricInterpretation.
+    - DigitalContrast < 0 (e.g. -1): already inverted at acquisition -> False
+    - DigitalContrast > 0 (e.g. +1): native uninverted BSE/SEM signal -> True
+    """
+    if fei_meta is None and first_path:
+        try:
+            with tifffile.TiffFile(first_path) as tf:
+                fei_meta = tf.fei_metadata
+                if photometric is None and tf.pages:
+                    photometric = getattr(tf.pages[0], "photometric", None)
+        except Exception:
+            fei_meta = {}
+
+    if isinstance(fei_meta, dict):
+        img_sec = fei_meta.get("Image", {})
+        det_sec = fei_meta.get("Detectors", {})
+        det_name = str(det_sec.get("Name", "") or "").strip() if isinstance(det_sec, dict) else ""
+        sig_sec = fei_meta.get(det_name, {}) if det_name else {}
+        signal = str(sig_sec.get("Signal", "") or "").strip() if isinstance(sig_sec, dict) else ""
+        det_desc = f"{det_name}/{signal}".strip("/") or "FEI"
+
+        dc_raw = img_sec.get("DigitalContrast") if isinstance(img_sec, dict) else None
+        if dc_raw not in (None, ""):
+            try:
+                dc_val = float(str(dc_raw).strip())
+                if dc_val < 0:
+                    return False, f"FEI DigitalContrast={dc_val:g} ({det_desc}): already inverted at acquisition -> keeping LUT."
+                if dc_val > 0:
+                    return True, f"FEI DigitalContrast={dc_val:g} ({det_desc}): uninverted signal -> enabling TrakEM2 Invert filter."
+            except Exception:
+                pass
+
+    if photometric is not None and int(getattr(photometric, "value", photometric)) == 0:
+        return False, "TIFF PhotometricInterpretation=MINISWHITE (0): already inverted -> keeping LUT."
+
+    return False, f"No FEI DigitalContrast metadata in {os.path.basename(first_path)}; keeping default LUT."
+
+
+def write_trakem2_xml(xml_path, layer_records, tile_w, tile_h, is_16bit, invert_lut=False):
     out_dir = os.path.dirname(xml_path)
     proj_title = os.path.splitext(os.path.basename(xml_path))[0]
     unuid = "%d.%d.%d" % (
@@ -841,14 +882,15 @@ def write_trakem2_xml(xml_path, layer_records, tile_w, tile_h, is_16bit):
             f.write('\t\t</t2_layer>\n')
 
         f.write('\t</t2_layer_set>\n')
+        filter_flag = "true" if invert_lut else "false"
         f.write(
             '\t<t2_display id="%d" layer_id="%d" c_alphas="-1" c_alphas_state="-1" '
             'x="0" y="0" magnification="0.15" srcrect_x="0" srcrect_y="0" '
             'srcrect_width="%d" srcrect_height="%d" scroll_step="1" '
-            'filter_enabled="false" filter_min_max_enabled="false" filter_min="0" filter_max="255" '
-            'filter_invert="false" filter_clahe_enabled="false" filter_clahe_block_size="127" '
+            'filter_enabled="%s" filter_min_max_enabled="false" filter_min="0" filter_max="255" '
+            'filter_invert="%s" filter_clahe_enabled="false" filter_clahe_block_size="127" '
             'filter_clahe_histogram_bins="256" filter_clahe_max_slope="3.0" />\n' % (
-                oid_counter, first_layer_id, layer_w, layer_h
+                oid_counter, first_layer_id, layer_w, layer_h, filter_flag, filter_flag
             )
         )
         f.write('</trakem2>\n')
@@ -934,6 +976,10 @@ def run_pipeline(
         page = tf.pages[0]
         tile_h, tile_w = page.shape[:2]
         is_16bit = (page.dtype == np.uint16)
+        fei_meta = tf.fei_metadata
+        photometric = getattr(page, "photometric", None)
+
+    invert_lut, lut_reason = detect_lut_inversion_from_fei(first_path, fei_meta=fei_meta, photometric=photometric)
 
     sorted_zs = sorted(tiles_by_z.keys())
     total_z = len(sorted_zs)
@@ -943,6 +989,7 @@ def run_pipeline(
     print("Tiles: %d across %d Z-sections | Tile size: %dx%d (%s)" % (
         sum(len(v) for v in tiles_by_z.values()), total_z,
         tile_w, tile_h, "16-bit" if is_16bit else "8-bit"), flush=True)
+    print("[LUT] " + lut_reason, flush=True)
 
     # Progress weights across passes (Pass 1 = 0..0.55, Pass 2 = 0.55..0.95, Pass 3 = 0.95..1.0)
     p1_span = 0.55 if (is_spatial_mosaic and total_z > 1) else (0.95 if is_spatial_mosaic else 0.0)
@@ -1035,7 +1082,7 @@ def run_pipeline(
             })
         layer_records.append({"z_orig": z, "patches": patches})
 
-    write_trakem2_xml(xml_path, layer_records, tile_w, tile_h, is_16bit)
+    write_trakem2_xml(xml_path, layer_records, tile_w, tile_h, is_16bit, invert_lut=invert_lut)
     print("[Pass 3/3] TrakEM2 XML written in %s." % format_eta(time.time() - t3), flush=True)
 
     total_time = time.time() - t_start

@@ -2,6 +2,7 @@ import json
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 
@@ -166,6 +167,158 @@ def get_sync_cache_root(destination_dir):
     """Returns the root directory on the local scratch drive where datasets are synced."""
     dest = (destination_dir or DEFAULT_CONFIG["destination_dir"]).strip()
     return dest or DEFAULT_CONFIG["destination_dir"]
+
+
+def _parse_fei_ini_text(raw_bytes):
+    text = raw_bytes.decode("latin-1", errors="replace").replace("\x00", "")
+    result = {}
+    section = {}
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("[") and line.endswith("]"):
+            section = {}
+            result[line[1:-1].strip()] = section
+            continue
+        if "=" in line:
+            key, val = line.split("=", 1)
+            section[key.strip()] = val.strip()
+    return result
+
+
+def read_fei_tiff_metadata(tiff_path):
+    """
+    Lightweight pure-stdlib reader for FEI/Thermo Fisher TIFF metadata tags
+    (34680 FEI_SFEG, 34682 FEI_HELIOS) and PhotometricInterpretation (262).
+    Returns (fei_dict, photometric_int_or_None).
+    """
+    fei_dict = {}
+    photometric = None
+    if not tiff_path or not os.path.isfile(tiff_path):
+        return fei_dict, photometric
+
+    try:
+        with open(tiff_path, "rb") as f:
+            header = f.read(16)
+            if len(header) < 8:
+                return fei_dict, photometric
+            bo = header[:2]
+            if bo == b"II":
+                endian = "<"
+            elif bo == b"MM":
+                endian = ">"
+            else:
+                return fei_dict, photometric
+
+            version = struct.unpack(endian + "H", header[2:4])[0]
+            type_sizes = {1: 1, 2: 1, 3: 2, 4: 4, 5: 8, 6: 1, 7: 1, 8: 2, 9: 4, 10: 8, 11: 4, 12: 8, 16: 8, 17: 8, 18: 8}
+
+            if version == 42:
+                ifd_offset = struct.unpack(endian + "I", header[4:8])[0]
+                if ifd_offset <= 0:
+                    return fei_dict, photometric
+                f.seek(ifd_offset)
+                count_bytes = f.read(2)
+                if len(count_bytes) < 2:
+                    return fei_dict, photometric
+                n_entries = struct.unpack(endian + "H", count_bytes)[0]
+                for _ in range(n_entries):
+                    entry = f.read(12)
+                    if len(entry) < 12:
+                        break
+                    tag, dtype, count = struct.unpack(endian + "HHI", entry[:8])
+                    val_raw = entry[8:12]
+                    if tag == 262 and count >= 1:
+                        if dtype == 3:
+                            photometric = struct.unpack(endian + "H", val_raw[:2])[0]
+                        elif dtype == 4:
+                            photometric = struct.unpack(endian + "I", val_raw)[0]
+                    elif tag in (34680, 34682) and count > 0:
+                        total_bytes = count * type_sizes.get(dtype, 1)
+                        if total_bytes <= 4:
+                            raw_payload = val_raw[:total_bytes]
+                        else:
+                            offset = struct.unpack(endian + "I", val_raw)[0]
+                            pos = f.tell()
+                            f.seek(offset)
+                            raw_payload = f.read(total_bytes)
+                            f.seek(pos)
+                        fei_dict.update(_parse_fei_ini_text(raw_payload))
+            elif version == 43:
+                if len(header) < 16:
+                    return fei_dict, photometric
+                ifd_offset = struct.unpack(endian + "Q", header[8:16])[0]
+                if ifd_offset <= 0:
+                    return fei_dict, photometric
+                f.seek(ifd_offset)
+                count_bytes = f.read(8)
+                if len(count_bytes) < 8:
+                    return fei_dict, photometric
+                n_entries = struct.unpack(endian + "Q", count_bytes)[0]
+                for _ in range(n_entries):
+                    entry = f.read(20)
+                    if len(entry) < 20:
+                        break
+                    tag, dtype, count = struct.unpack(endian + "HHQ", entry[:12])
+                    val_raw = entry[12:20]
+                    if tag == 262 and count >= 1:
+                        if dtype == 3:
+                            photometric = struct.unpack(endian + "H", val_raw[:2])[0]
+                        elif dtype in (4, 16):
+                            photometric = struct.unpack(endian + ("I" if dtype == 4 else "Q"), val_raw[:4 if dtype == 4 else 8])[0]
+                    elif tag in (34680, 34682) and count > 0:
+                        total_bytes = count * type_sizes.get(dtype, 1)
+                        if total_bytes <= 8:
+                            raw_payload = val_raw[:total_bytes]
+                        else:
+                            offset = struct.unpack(endian + "Q", val_raw)[0]
+                            pos = f.tell()
+                            f.seek(offset)
+                            raw_payload = f.read(total_bytes)
+                            f.seek(pos)
+                        fei_dict.update(_parse_fei_ini_text(raw_payload))
+    except Exception:
+        pass
+    return fei_dict, photometric
+
+
+def detect_lut_inversion_needed(tiff_path, default_if_missing=False):
+    """
+    Inspects the first TIFF's FEI DigitalContrast metadata (and PhotometricInterpretation)
+    to determine whether the acquisition requires LUT inversion for brightfield TEM-like viewing.
+    - DigitalContrast < 0 (e.g. -1): already inverted at acquisition -> False
+    - DigitalContrast > 0 (e.g. +1): raw uninverted signal -> True
+    Returns (invert_needed: bool, reason: str).
+    """
+    if not tiff_path or not os.path.isfile(tiff_path):
+        return default_if_missing, "No TIFF available for LUT inspection; using default."
+
+    fei, photometric = read_fei_tiff_metadata(tiff_path)
+    img_sec = fei.get("Image", {}) if isinstance(fei, dict) else {}
+    det_sec = fei.get("Detectors", {}) if isinstance(fei, dict) else {}
+    det_name = str(det_sec.get("Name", "") or "").strip()
+    signal = str(fei.get(det_name, {}).get("Signal", "") or "").strip() if det_name else ""
+    det_desc = f"{det_name}/{signal}".strip("/") or "FEI"
+
+    dc_raw = img_sec.get("DigitalContrast")
+    if dc_raw not in (None, ""):
+        try:
+            dc_val = float(str(dc_raw).strip())
+            if dc_val < 0:
+                return False, f"FEI DigitalContrast={dc_val:g} ({det_desc}): already inverted LUT at acquisition -> keeping LUT."
+            if dc_val > 0:
+                return True, f"FEI DigitalContrast={dc_val:g} ({det_desc}): native uninverted signal -> applying Invert LUT."
+        except Exception:
+            pass
+
+    if photometric == 0:
+        return False, "TIFF PhotometricInterpretation=MINISWHITE (0): already inverted -> keeping LUT."
+
+    return (
+        bool(default_if_missing),
+        f"No FEI DigitalContrast tag in header ({os.path.basename(tiff_path)}); using default ({'Invert' if default_if_missing else 'Keep'}).",
+    )
 
 
 def resource_path(relative_path):

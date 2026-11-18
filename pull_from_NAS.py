@@ -31,6 +31,7 @@ from bioem_config import (
     configure_indexer_autostart,
     deploy_fiji_watcher,
     detect_fiji_executable,
+    detect_lut_inversion_needed,
     ensure_indexer_running,
     get_aligned_dataset_record,
     get_cache_file_path,
@@ -1799,8 +1800,21 @@ class NASPuller(ctk.CTk):
         if source:
             self.run_sync(source, acq_type="auto")
 
+    @staticmethod
+    def _find_first_tiff(folder_path):
+        if not folder_path or not os.path.isdir(folder_path):
+            return None
+        matches = []
+        for root, _, files in os.walk(folder_path):
+            for fname in sorted(files):
+                if fname.lower().endswith((".tif", ".tiff")):
+                    matches.append(os.path.join(root, fname))
+            if matches:
+                break
+        return matches[0] if matches else None
+
     # Fiji Virtual Stack Launch (Workflow 1: Z-Stack)
-    def launch_fiji_virtual_stack(self, folder_path, project_name="EM_Project"):
+    def launch_fiji_virtual_stack(self, folder_path, project_name="EM_Project", invert_lut=True):
         app_path = self.config.get("app_path", APP_PATH)
         if not app_path or not os.path.exists(app_path):
             raise FileNotFoundError(f"Fiji executable not found at: {app_path}\nUpdate it in Settings.")
@@ -1808,7 +1822,8 @@ class NASPuller(ctk.CTk):
         deploy_fiji_watcher(app_path)
         formatted_path = folder_path.replace("\\", "/")
         trigger_path = get_trigger_file_path()
-        payload = f"{formatted_path}|{project_name}|z-stack|1|1"
+        invert_flag = "1" if invert_lut else "0"
+        payload = f"{formatted_path}|{project_name}|z-stack|1|1|{invert_flag}"
         with open(trigger_path, "w", encoding="utf-8") as f:
             f.write(payload)
 
@@ -1969,8 +1984,13 @@ class NASPuller(ctk.CTk):
 
             # WORKFLOW 1: Simple Z-Stack -> Fiji Virtual Stack (unless explicit Z-alignment requested)
             if acq_type == "z-stack" and post_action != "align_z":
-                self.launch_fiji_virtual_stack(final_dest, project_name=project_name)
-                self._append_action_log("[Fiji] Dispatched Z-Stack to BioEM_Watcher.ijm (Virtual Stack).")
+                first_tif = self._find_first_tiff(final_dest)
+                invert_lut, lut_reason = detect_lut_inversion_needed(first_tif, default_if_missing=True)
+                self._append_action_log(f"[LUT] {lut_reason}")
+                self.launch_fiji_virtual_stack(final_dest, project_name=project_name, invert_lut=invert_lut)
+                self._append_action_log(
+                    f"[Fiji] Dispatched Z-Stack to BioEM_Watcher.ijm (Virtual Stack, Invert LUT={'ON' if invert_lut else 'OFF'})."
+                )
                 stamp = time.strftime("%H:%M")
                 self.after(0, lambda: self.latest_path_label.configure(
                     text=f"Last Sync (Z-Stack): {display_title} [{stamp}]", text_color="#2ecc71"

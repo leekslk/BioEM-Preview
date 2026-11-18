@@ -20,6 +20,7 @@ while (true) {
             mode = "z-stack";
             rows = "1";
             cols = "1";
+            invertLut = "1";
             
             if (parts.length >= 5) {
                 projectName = parts[1];
@@ -27,8 +28,11 @@ while (true) {
                 rows = parts[3];
                 cols = parts[4];
             }
+            if (parts.length >= 6) {
+                invertLut = trim(parts[5]);
+            }
             
-            print("Action Triggered: " + projectName + " [" + mode + "]");
+            print("Action Triggered: " + projectName + " [" + mode + ", invert=" + invertLut + "]");
 
             // WORKFLOW 1: 2D MOSAIC & MOSAIC Z-STACK 
             if (mode == "mosaic" || mode == "mosaic-z" || mode == "mosaic-stack") {
@@ -38,7 +42,9 @@ while (true) {
             // WORKFLOW 2: STANDARD SINGLE-TILE Z-STACK
             } else {
                 run("Image Sequence...", "open=[" + targetPath + "] sort use");
-                run("Invert LUT");
+                if (invertLut == "1") {
+                    run("Invert LUT");
+                }
             }
             print("Waiting for next sync...");
         }
