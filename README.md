@@ -24,7 +24,7 @@ Moving large SBF-SEM tile streams across the network and configuring alignment p
 ---
 * **First-Run Setup Wizard & Settings:** On first launch, prompts for your scratch SSD (`DESTINATION_DIR`), NAS drive (`NAS_DIR`), and Fiji executable (`APP_PATH`) with sensible defaults. Automatically places `BioEM_Watcher.ijm` inside Fiji and starts the built-in background NAS crawler (`--indexer`) at Windows login.
 * **Live Acquisition Browser:** Shows recent sessions (last 14 days / minimum 12 entries) under **Available on NAS**, older sessions under **All Available Data**, and local syncs under **Recent Local Syncs**.
-* **Smart Delta Sync & Housekeeping:** Skips unchanged `.tif` files and automatically cleans cached folders older than 30 days inside `<DESTINATION_DIR>\BioEM_Cache\`.
+* **Smart Delta Sync & Housekeeping:** Skips unchanged `.tif` files and automatically cleans cached acquisition folders older than 30 days inside `<DESTINATION_DIR>`.
 * **Context Menu Actions:** Right-click any dataset to **Refresh Folder (Wipe & Sync)** or **Delete Local Cache** without touching raw NAS data.
 * **Fast GPU/CPU Mosaic & Z-Stack Alignment:** Aligns 2D tiles and serial Z-sections with live per-step progress, elapsed time, and ETA, then exports a ready-to-inspect TrakEM2 `.xml` project.
 

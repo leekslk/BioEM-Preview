@@ -784,10 +784,24 @@ class NASPuller(ctk.CTk):
             self.after(SCAN_INTERVAL, self.launch_background_scan)
 
     def _run_housekeeping(self):
-        """Scans BioEM_Cache inside DESTINATION_DIR and removes cached acquisitions older than 30 days."""
+        """Scans DESTINATION_DIR and removes cached acquisition folders older than 30 days, skipping protected folders."""
         try:
             seconds_in_30_days = 30 * 24 * 60 * 60
             cutoff_time = time.time() - seconds_in_30_days
+            protected_folders = {
+                "bioem sync tool",
+                "pc_backup",
+                "shareddata",
+                "software",
+                "system volume information",
+                "$recycle.bin",
+                "msocache",
+                "recovery",
+                "windows",
+                "program files",
+                "program files (x86)",
+                "users",
+            }
             cache_root = get_sync_cache_root(self.config.get("destination_dir"))
             if not os.path.exists(cache_root):
                 return
@@ -795,6 +809,8 @@ class NASPuller(ctk.CTk):
             for item in os.listdir(cache_root):
                 item_path = os.path.join(cache_root, item)
                 if not os.path.isdir(item_path):
+                    continue
+                if item.lower() in protected_folders:
                     continue
                 try:
                     if os.path.getmtime(item_path) < cutoff_time:
@@ -1129,7 +1145,7 @@ class NASPuller(ctk.CTk):
         dest_dir = self.config.get("destination_dir", DESTINATION_DIR)
         candidates = [
             os.path.join(get_sync_cache_root(dest_dir), safe_folder_name),
-            os.path.join(dest_dir, safe_folder_name),  # Legacy Alpha root path
+            os.path.join(dest_dir, "BioEM_Cache", safe_folder_name),
         ]
         purged = False
         for target_dir in candidates:
@@ -1176,7 +1192,7 @@ class NASPuller(ctk.CTk):
         dest_dir = self.config.get("destination_dir", DESTINATION_DIR)
         for final_dest in [
             os.path.join(get_sync_cache_root(dest_dir), safe_folder_name),
-            os.path.join(dest_dir, safe_folder_name),
+            os.path.join(dest_dir, "BioEM_Cache", safe_folder_name),
         ]:
             if os.path.exists(final_dest):
                 try:

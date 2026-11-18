@@ -95,12 +95,9 @@ def get_last_log_file_path():
 
 
 def get_sync_cache_root(destination_dir):
-    """
-    Stores synced acquisition folders inside a dedicated 'BioEM_Cache' subfolder
-    under destination_dir so 30-day housekeeping never touches unrelated drive data.
-    """
+    """Returns the root directory on the local scratch drive where datasets are synced."""
     dest = (destination_dir or DEFAULT_CONFIG["destination_dir"]).strip()
-    return os.path.join(dest, "BioEM_Cache")
+    return dest or DEFAULT_CONFIG["destination_dir"]
 
 
 def resource_path(relative_path):
