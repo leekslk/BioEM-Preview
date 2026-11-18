@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 import json
 import re
@@ -8,6 +9,7 @@ from bioem_config import (
     get_cache_file_path,
     load_config,
     INDEXER_PID_FILENAME,
+    INDEXER_PROTOCOL_VERSION,
 )
 
 # CONFIGURATION
@@ -116,9 +118,14 @@ def run_indexer_loop(stop_event=None):
     print("===========================================")
 
     pid_file = os.path.join(get_app_data_dir(), INDEXER_PID_FILENAME)
+    pid_payload = {
+        "pid": os.getpid(),
+        "exe": os.path.abspath(sys.executable),
+        "version": INDEXER_PROTOCOL_VERSION,
+    }
     try:
         with open(pid_file, "w", encoding="utf-8") as f:
-            f.write(str(os.getpid()))
+            json.dump(pid_payload, f)
     except Exception:
         pass
 
@@ -162,8 +169,10 @@ def run_indexer_loop(stop_event=None):
         try:
             if os.path.exists(pid_file):
                 with open(pid_file, "r", encoding="utf-8") as f:
-                    if f.read().strip() == str(os.getpid()):
-                        os.remove(pid_file)
+                    raw = f.read().strip()
+                owner_pid = json.loads(raw).get("pid") if raw.startswith("{") else int(raw)
+                if owner_pid == os.getpid():
+                    os.remove(pid_file)
         except Exception:
             pass
 

@@ -298,6 +298,7 @@ def run_align_subprocess(
     fiji_exe,
     open_fiji=True,
     progress_callback=None,
+    log_callback=None,
 ):
     """
     Runs bioem_torch_align.py in the managed/selected Python runtime and
@@ -360,6 +361,11 @@ def run_align_subprocess(
                 pass
         elif line:
             print(line, flush=True)
+            if log_callback:
+                try:
+                    log_callback(line)
+                except Exception:
+                    pass
             log_tail.append(line)
             if len(log_tail) > 40:
                 log_tail.pop(0)

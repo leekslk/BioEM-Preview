@@ -23,7 +23,9 @@ HISTORY_FILENAME = "fiji_sync_history.json"
 CONFIG_FILENAME = "config.json"
 TRIGGER_FILENAME = "fiji_trigger.txt"
 INDEXER_PID_FILENAME = "indexer.pid"
+LAST_LOG_FILENAME = "last_action.log"
 STARTUP_SCRIPT_NAME = "BioEM_NAS_Indexer.vbs"
+INDEXER_PROTOCOL_VERSION = 2
 
 
 def get_app_data_dir():
@@ -85,6 +87,11 @@ def get_history_file_path():
 def get_trigger_file_path():
     """Returns the shared trigger file path read by BioEM_Watcher.ijm and pull_from_NAS.py."""
     return os.path.join(get_app_data_dir(), TRIGGER_FILENAME).replace("\\", "/")
+
+
+def get_last_log_file_path():
+    """Returns the file path storing the log lines of the last performed action."""
+    return os.path.join(get_app_data_dir(), LAST_LOG_FILENAME)
 
 
 def get_sync_cache_root(destination_dir):
@@ -277,16 +284,31 @@ def configure_indexer_autostart(enable=True):
         return False, "Failed to register Startup launcher: %s" % exc
 
 
-def is_indexer_running():
-    """Checks if a BioEM indexer process is currently active via PID file."""
+def _read_indexer_pid_info():
     pid_file = os.path.join(get_app_data_dir(), INDEXER_PID_FILENAME)
     if not os.path.exists(pid_file):
-        return False
+        return None
     try:
         with open(pid_file, "r", encoding="utf-8") as f:
-            pid = int(f.read().strip())
-        if pid <= 0:
-            return False
+            raw = f.read().strip()
+        if not raw:
+            return None
+        if raw.startswith("{"):
+            return json.loads(raw)
+        return {"pid": int(raw), "exe": "", "version": 1}
+    except Exception:
+        return None
+
+
+def is_indexer_running():
+    """Checks if a BioEM indexer process is currently active via PID file."""
+    info = _read_indexer_pid_info()
+    if not info:
+        return False
+    pid = int(info.get("pid", 0) or 0)
+    if pid <= 0:
+        return False
+    try:
         import psutil
         if psutil.pid_exists(pid):
             proc = psutil.Process(pid)
@@ -297,10 +319,45 @@ def is_indexer_running():
     return False
 
 
+def _stop_stale_indexer():
+    """Stops an older-version or differently-located indexer process if active."""
+    info = _read_indexer_pid_info()
+    if not info:
+        return
+    pid = int(info.get("pid", 0) or 0)
+    if pid <= 0:
+        return
+    try:
+        import psutil
+        if psutil.pid_exists(pid):
+            proc = psutil.Process(pid)
+            if proc.is_running() and proc.status() != psutil.STATUS_ZOMBIE:
+                proc.terminate()
+                try:
+                    proc.wait(timeout=3)
+                except Exception:
+                    proc.kill()
+    except Exception:
+        pass
+
+
 def ensure_indexer_running():
-    """Launches the background indexer silently if not already running."""
-    if is_indexer_running():
-        return True, "Background indexer already running."
+    """
+    Launches the background indexer silently if not running, or restarts it
+    automatically if an older version / different executable path was left active.
+    """
+    info = _read_indexer_pid_info()
+    if is_indexer_running() and info:
+        same_version = int(info.get("version", 1) or 1) == INDEXER_PROTOCOL_VERSION
+        running_exe = info.get("exe", "")
+        same_exe = (
+            bool(running_exe)
+            and os.path.normcase(os.path.abspath(running_exe))
+            == os.path.normcase(os.path.abspath(sys.executable))
+        )
+        if same_version and same_exe:
+            return True, "Background indexer already running."
+        _stop_stale_indexer()
 
     try:
         if getattr(sys, "frozen", False):

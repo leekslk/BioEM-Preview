@@ -31,6 +31,7 @@ from bioem_config import (
     ensure_indexer_running,
     get_cache_file_path,
     get_history_file_path,
+    get_last_log_file_path,
     get_sync_cache_root,
     get_trigger_file_path,
     load_config,
@@ -388,10 +389,13 @@ class NASPuller(ctk.CTk):
         except Exception as e:
             print(f"Icon Error: {e}")
 
-        # MASTER GRID: 1 Row, 2 Columns (Sidebar + Main Content)
+        # MASTER GRID: 1 Row, 3 Columns (Left Nav Sidebar + Main Content + Collapsible Right Logs Sidebar)
         self.grid_rowconfigure(0, weight=1)
         self.grid_columnconfigure(0, weight=0)
         self.grid_columnconfigure(1, weight=1)
+        self.grid_columnconfigure(2, weight=0)
+        self.logs_visible = False
+        self._log_lock = threading.Lock()
 
         # ZONE 1: THE SIDEBAR (Left)
         self.sidebar = ctk.CTkFrame(self, width=260, corner_radius=0, fg_color="#f3f3f3")
@@ -420,7 +424,7 @@ class NASPuller(ctk.CTk):
         self.btn_nav_nas.grid(row=2, column=0, padx=15, pady=5, sticky="ew")
 
         self.btn_nav_all = ctk.CTkButton(
-            self.sidebar, text="🗄️ All Available Data",
+            self.sidebar, text="📁 All Available Data",
             font=("Segoe UI", 13), anchor="w", height=40,
             fg_color="transparent", text_color="black", hover_color="#d4d4d4",
             command=self.show_all_view,
@@ -459,7 +463,7 @@ class NASPuller(ctk.CTk):
         )
         self.btn_latest.grid(row=8, column=0, padx=20, pady=(0, 30), sticky="ew")
 
-        # ZONE 2: MAIN CONTENT AREA (Right)
+        # ZONE 2: MAIN CONTENT AREA (Center)
         self.main_content = ctk.CTkFrame(self, corner_radius=0, fg_color="#ffffff")
         self.main_content.grid(row=0, column=1, sticky="nsew")
         self.main_content.grid_rowconfigure(0, weight=1)
@@ -487,13 +491,83 @@ class NASPuller(ctk.CTk):
         self.progress.set(0)
         self.progress.pack(fill="x", padx=40, pady=(18, 6))
 
-        self.status = ctk.CTkLabel(self.footer_card, text="System Ready.", font=("Segoe UI", 11, "bold"), text_color="#333333")
-        self.status.pack(pady=(0, 3))
+        footer_meta = ctk.CTkFrame(self.footer_card, fg_color="transparent")
+        footer_meta.pack(fill="x", padx=40, pady=(0, 12))
+        footer_meta.grid_columnconfigure(0, weight=1)
+
+        self.status = ctk.CTkLabel(
+            footer_meta, text="System Ready.", font=("Segoe UI", 11, "bold"), text_color="#333333", anchor="w"
+        )
+        self.status.grid(row=0, column=0, sticky="w")
 
         self.latest_path_label = ctk.CTkLabel(
-            self.footer_card, text="Scanning...", font=("Segoe UI", 11, "italic"), text_color="#777777"
+            footer_meta, text="Scanning...", font=("Segoe UI", 11, "italic"), text_color="#777777", anchor="w"
         )
-        self.latest_path_label.pack(pady=(0, 14))
+        self.latest_path_label.grid(row=1, column=0, sticky="w", pady=(2, 0))
+
+        self.btn_toggle_logs = ctk.CTkButton(
+            footer_meta,
+            text="📋 Logs ◀",
+            width=95,
+            height=28,
+            font=("Segoe UI", 11, "bold"),
+            fg_color="#e5e5e5",
+            text_color="#222222",
+            hover_color="#d4d4d4",
+            command=self.toggle_logs_sidebar,
+        )
+        self.btn_toggle_logs.grid(row=0, column=1, rowspan=2, sticky="e", padx=(12, 0))
+
+        # ZONE 3: COLLAPSIBLE RIGHT LOGS SIDEBAR (Hidden by default)
+        self.logs_sidebar = ctk.CTkFrame(self, width=380, corner_radius=0, fg_color="#f5f6f8")
+        self.logs_sidebar.grid_propagate(False)
+        self.logs_sidebar.grid_rowconfigure(1, weight=1)
+        self.logs_sidebar.grid_columnconfigure(0, weight=1)
+
+        logs_hdr = ctk.CTkFrame(self.logs_sidebar, fg_color="transparent")
+        logs_hdr.grid(row=0, column=0, sticky="ew", padx=14, pady=(18, 8))
+        logs_hdr.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            logs_hdr, text="Last Action Logs", font=("Segoe UI", 15, "bold"), text_color="#111111"
+        ).grid(row=0, column=0, sticky="w")
+
+        ctk.CTkButton(
+            logs_hdr,
+            text="Clear",
+            width=55,
+            height=26,
+            font=("Segoe UI", 11),
+            fg_color="#e5e5e5",
+            text_color="#222222",
+            hover_color="#d4d4d4",
+            command=self._clear_action_log,
+        ).grid(row=0, column=1, padx=(6, 4))
+
+        ctk.CTkButton(
+            logs_hdr,
+            text="✕",
+            width=28,
+            height=26,
+            font=("Segoe UI", 11, "bold"),
+            fg_color="transparent",
+            text_color="#555555",
+            hover_color="#e0e0e0",
+            command=self.toggle_logs_sidebar,
+        ).grid(row=0, column=2)
+
+        log_font = ("Consolas", 10) if sys.platform == "win32" else ("Menlo", 11)
+        self.logs_textbox = ctk.CTkTextbox(
+            self.logs_sidebar,
+            font=log_font,
+            fg_color="#ffffff",
+            text_color="#222222",
+            border_width=1,
+            border_color="#dddddd",
+            wrap="word",
+        )
+        self.logs_textbox.grid(row=1, column=0, sticky="nsew", padx=14, pady=(0, 14))
+        self.logs_textbox.configure(state="disabled")
 
         self.nas_rows = []
         self.nas_buttons = []
@@ -502,6 +576,7 @@ class NASPuller(ctk.CTk):
         self.all_rows = []
         self.all_buttons = []
 
+        self._load_last_action_log()
         self.load_history()
         self.render_nas_buttons()
         self.render_history_buttons()
@@ -520,10 +595,90 @@ class NASPuller(ctk.CTk):
             except Exception:
                 pass
             deploy_fiji_watcher(self.config.get("app_path"))
+            if self.config.get("auto_start_indexer", True):
+                configure_indexer_autostart(True)
             ensure_indexer_running()
 
         self.launch_background_scan()
         threading.Thread(target=self._run_housekeeping, daemon=True).start()
+
+    def toggle_logs_sidebar(self):
+        if self.logs_visible:
+            self.logs_sidebar.grid_forget()
+            self.logs_visible = False
+            self.btn_toggle_logs.configure(text="📋 Logs ◀")
+        else:
+            self.logs_sidebar.grid(row=0, column=2, sticky="nsew")
+            self.logs_visible = True
+            self.btn_toggle_logs.configure(text="📋 Logs ▶")
+            self.logs_textbox.see("end")
+
+    def _load_last_action_log(self):
+        log_file = get_last_log_file_path()
+        content = ""
+        if os.path.exists(log_file):
+            try:
+                with open(log_file, "r", encoding="utf-8") as f:
+                    content = f.read()
+            except Exception:
+                content = ""
+        if not content.strip():
+            content = "No actions recorded yet.\nSelect an acquisition to view sync & alignment pass logs here.\n"
+        self.logs_textbox.configure(state="normal")
+        self.logs_textbox.delete("1.0", "end")
+        self.logs_textbox.insert("end", content)
+        self.logs_textbox.see("end")
+        self.logs_textbox.configure(state="disabled")
+
+    def _reset_action_log(self, header_line):
+        stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        text = f"[{stamp}] {header_line}\n" + ("-" * 48) + "\n"
+        with self._log_lock:
+            try:
+                with open(get_last_log_file_path(), "w", encoding="utf-8") as f:
+                    f.write(text)
+            except Exception:
+                pass
+
+        def _ui():
+            self.logs_textbox.configure(state="normal")
+            self.logs_textbox.delete("1.0", "end")
+            self.logs_textbox.insert("end", text)
+            self.logs_textbox.see("end")
+            self.logs_textbox.configure(state="disabled")
+
+        self.after(0, _ui)
+
+    def _append_action_log(self, line):
+        clean = str(line).rstrip("\r\n")
+        if not clean:
+            return
+        with self._log_lock:
+            try:
+                with open(get_last_log_file_path(), "a", encoding="utf-8") as f:
+                    f.write(clean + "\n")
+            except Exception:
+                pass
+
+        def _ui():
+            self.logs_textbox.configure(state="normal")
+            self.logs_textbox.insert("end", clean + "\n")
+            self.logs_textbox.see("end")
+            self.logs_textbox.configure(state="disabled")
+
+        self.after(0, _ui)
+
+    def _clear_action_log(self):
+        with self._log_lock:
+            try:
+                if os.path.exists(get_last_log_file_path()):
+                    os.remove(get_last_log_file_path())
+            except Exception:
+                pass
+        self.logs_textbox.configure(state="normal")
+        self.logs_textbox.delete("1.0", "end")
+        self.logs_textbox.insert("end", "Logs cleared.\n")
+        self.logs_textbox.configure(state="disabled")
 
     def _on_config_updated(self, new_cfg):
         self.config = new_cfg
@@ -766,16 +921,18 @@ class NASPuller(ctk.CTk):
         row_frame = ctk.CTkFrame(parent_container, fg_color="transparent")
         row_frame.pack(fill="x", padx=30, pady=3)
 
-        badge_width = 155
         if acq_type == "mosaic-z":
             badge_text = f"Mosaic Z ({rows}x{cols}, z={z_slices})" if z_slices else f"Mosaic Z ({rows}x{cols})"
-            badge_bg = "#8e44ad"  # Fluent Purple
+            badge_bg = "#e74c3c"  # Fluent Red (widest)
+            badge_width = 195
         elif acq_type == "mosaic":
             badge_text = f"Mosaic ({rows}x{cols})"
-            badge_bg = "#e67e22"  # Fluent Orange
+            badge_bg = "#e67e22"  # Fluent Orange (medium)
+            badge_width = 120
         else:
             badge_text = "Z-Stack"
-            badge_bg = "#2ecc71"  # Fluent Green
+            badge_bg = "#2ecc71"  # Fluent Green (narrowest)
+            badge_width = 75
 
         ctk.CTkLabel(
             row_frame,
@@ -1155,6 +1312,7 @@ class NASPuller(ctk.CTk):
         final_dest = os.path.join(dest_root, safe_folder_name)
 
         try:
+            self._reset_action_log(f"Action: {display_title} ({source_folder})")
             self.after(0, lambda: self.latest_path_label.configure(
                 text=f"Syncing: {display_title}", text_color="#3498db"
             ))
@@ -1170,6 +1328,7 @@ class NASPuller(ctk.CTk):
 
             total_files = len(all_files)
             if total_files == 0:
+                self._append_action_log("[Sync] No .tif/.tiff files found.")
                 self.after(0, lambda: messagebox.showinfo("No Images Found", "This folder contains no .tif/.tiff files."))
                 return
 
@@ -1179,6 +1338,8 @@ class NASPuller(ctk.CTk):
                 acq_type = detected["type"]
                 rows = detected["rows"]
                 cols = detected["cols"]
+
+            self._append_action_log(f"[Sync] Type: {acq_type} ({rows}x{cols}) | Files: {total_files} | Dest: {final_dest}")
 
             files_processed = 0
             files_skipped = 0
@@ -1218,11 +1379,16 @@ class NASPuller(ctk.CTk):
                         self.status.configure(text=m, text_color="#333333"),
                     ))
 
+            sync_elapsed = time.time() - t_sync_start
+            self._append_action_log(
+                f"[Sync] Completed in {format_duration(sync_elapsed)} (Copied: {files_copied}, Skipped: {files_skipped})."
+            )
             self.after(0, lambda: self.save_history(source_folder))
 
             # WORKFLOW 1: Simple Z-Stack -> Fiji Virtual Stack
             if acq_type == "z-stack":
                 self.launch_fiji_virtual_stack(final_dest, project_name=project_name)
+                self._append_action_log("[Fiji] Dispatched Z-Stack to BioEM_Watcher.ijm (Virtual Stack).")
                 stamp = time.strftime("%H:%M")
                 self.after(0, lambda: self.latest_path_label.configure(
                     text=f"Last Sync (Z-Stack): {display_title} [{stamp}]", text_color="#2ecc71"
@@ -1233,7 +1399,7 @@ class NASPuller(ctk.CTk):
             self.after(0, lambda: (
                 self.progress.set(0.02),
                 self.latest_path_label.configure(
-                    text=f"Aligning ({acq_type}, {rows}x{cols}): {display_title}", text_color="#8e44ad"
+                    text=f"Aligning ({acq_type}, {rows}x{cols}): {display_title}", text_color="#e74c3c" if acq_type == "mosaic-z" else "#e67e22"
                 ),
                 self.status.configure(text="Checking PyTorch alignment engine...", text_color="#333333"),
             ))
@@ -1260,6 +1426,7 @@ class NASPuller(ctk.CTk):
                 prompt_done.wait()
 
                 if not should_install[0]:
+                    self._append_action_log("[Engine] Alignment skipped: PyTorch runtime not installed.")
                     self.after(0, lambda: (
                         self.status.configure(
                             text="Sync complete. Install Alignment Engine in Settings to run Mosaic alignment.",
@@ -1280,6 +1447,7 @@ class NASPuller(ctk.CTk):
                 )
                 self.config = load_config()
 
+            self._append_action_log(f"[Engine] Using {engine_desc} ({engine_python})")
             self.after(0, lambda d=engine_desc: self.status.configure(
                 text=f"Starting BioEM PyTorch Aligner ({d})...", text_color="#333333"
             ))
@@ -1303,9 +1471,11 @@ class NASPuller(ctk.CTk):
                 fiji_exe=self.config.get("app_path", APP_PATH),
                 open_fiji=True,
                 progress_callback=on_align_progress,
+                log_callback=self._append_action_log,
             )
 
             stamp = time.strftime("%H:%M")
+            self._append_action_log(f"[Done] Saved TrakEM2 XML and launched Fiji: {xml_path}")
             self.after(0, lambda: (
                 self.progress.set(1.0),
                 self.status.configure(text=f"✅ Aligned & opened in Fiji: {os.path.basename(xml_path)}", text_color="#2ecc71"),
@@ -1314,6 +1484,7 @@ class NASPuller(ctk.CTk):
 
         except Exception as exc:
             err_msg = str(exc)
+            self._append_action_log(f"[ERROR] {err_msg}")
             self.after(0, lambda m=err_msg: (
                 self.status.configure(text=f"Error: {m}", text_color="#e74c3c"),
                 messagebox.showerror("Sync / Alignment Error", m),
