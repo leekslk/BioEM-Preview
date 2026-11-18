@@ -89,7 +89,7 @@ https://github.com/user-attachments/assets/1aa24e65-4b3c-42e8-9dc8-9fbea3e142d8
 #### 2. Z-Stack: Right-Click → Align and Display (TrakEM2)
 Right-click a `Z-Stack`, choose **📐 Align and Display** to run PyTorch rigid Z-alignment (Pass 2) + TrakEM2 `.xml` generation inside `D:\<DatasetName>\`, and open in TrakEM2.
 
-> _Demo slot (`docs/media/demo_2_zstack_align.gif` or drag-and-drop `.mp4` in GitHub editor)_
+https://github.com/user-attachments/assets/d79dca7f-c68c-4e12-be86-e9ebd16b52c7
 
 #### 3. Mosaic Z-Stack Alignment & Extended Logs Sidebar
 Click a `Mosaic Z` dataset to run 2D stitching (Pass 1) and sequential Z-alignment (Pass 2) while expanding the right-hand **Logs** panel to monitor per-pass elapsed/remaining times and LUT detection.
