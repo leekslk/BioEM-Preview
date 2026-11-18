@@ -16,6 +16,28 @@ Moving large SBF-SEM tile streams across the network and configuring alignment p
 * *Install and run the app, complete the quick First-Run Setup once, and click any dataset.*
 * *Z-stacks open straight into Fiji as virtual stacks (with optional Z-align); Mosaics and Mosaic Z-stacks are automatically aligned and opened as TrakEM2 projects, ready for portable one-click package export.*
 
+## Workflow Demonstrations
+
+### 1. Z-Stack: Delta Sync & Display in Fiji (Virtual Stack)
+Click any `Z-Stack` acquisition to delta-sync `.tif` slices into `D:\<DatasetName>\`, automatically inspect FEI `DigitalContrast` metadata, and display as a Virtual Stack in Fiji.
+
+https://github.com/user-attachments/assets/1aa24e65-4b3c-42e8-9dc8-9fbea3e142d8
+
+### 2. Z-Stack: Right-Click → Align and Display (TrakEM2)
+Right-click a `Z-Stack`, choose **📐 Align and Display** to run PyTorch rigid Z-alignment (Pass 2) + TrakEM2 `.xml` generation inside `D:\<DatasetName>\`, and open in TrakEM2.
+
+https://github.com/user-attachments/assets/d79dca7f-c68c-4e12-be86-e9ebd16b52c7
+
+### 3. Mosaic Z-Stack Alignment & Extended Logs Sidebar
+Click a `Mosaic Z` dataset to run 2D stitching (Pass 1) and sequential Z-alignment (Pass 2) while expanding the right-hand **Logs** panel to monitor per-pass elapsed/remaining times and LUT detection.
+
+https://github.com/user-attachments/assets/1d0c0cb1-a22a-404d-a16f-fb01e48e392c
+
+### 4. Export Portable Data Package
+Right-click a synchronized and aligned dataset (e.g., an aligned `Z-Stack` or `Mosaic Z-Stack`), select **📦 Export Data Package**, choose a target directory, and inspect the generated self-contained folder (`<DatasetName>.xml`, `images/`, `trakem2.*` mipmaps, and saved alignment log).
+
+https://github.com/user-attachments/assets/9d91f4f9-c5a2-478b-b2f2-ac7db675d4d2
+
 ## System Architecture
 <p align="center">
   <img src="docs/system_architecture.svg" width="100%" alt="BioEM Preview System Architecture">
@@ -78,28 +100,6 @@ Once complete, extract `dist\Preview_beta-YYYYMMMDD.zip` and copy its contents (
 2. Click any acquisition under **Available on NAS** (or use **Pull Latest Acquisition** / **Manually Select Folder**), or right-click any entry for contextual actions (**Show Folder**, **Align and Display**, **Export Data Package**, **Refresh**, **Delete Local Cache**).
 3. Watch the progress bar (and toggle the **Logs** sidebar) for delta sync, FEI contrast LUT detection, and alignment passes with elapsed and remaining time.
 4. Fiji opens automatically with either your virtual Z-stack or your aligned TrakEM2 `.xml` project stored inside `<DESTINATION_DIR>\<DatasetName>\`.
-
-### Workflow Demonstrations
-
-#### 1. Z-Stack: Delta Sync & Display in Fiji (Virtual Stack)
-Click any `Z-Stack` acquisition to delta-sync `.tif` slices into `D:\<DatasetName>\`, automatically inspect FEI `DigitalContrast` metadata, and display as a Virtual Stack in Fiji.
-
-https://github.com/user-attachments/assets/1aa24e65-4b3c-42e8-9dc8-9fbea3e142d8
-
-#### 2. Z-Stack: Right-Click → Align and Display (TrakEM2)
-Right-click a `Z-Stack`, choose **📐 Align and Display** to run PyTorch rigid Z-alignment (Pass 2) + TrakEM2 `.xml` generation inside `D:\<DatasetName>\`, and open in TrakEM2.
-
-https://github.com/user-attachments/assets/d79dca7f-c68c-4e12-be86-e9ebd16b52c7
-
-#### 3. Mosaic Z-Stack Alignment & Extended Logs Sidebar
-Click a `Mosaic Z` dataset to run 2D stitching (Pass 1) and sequential Z-alignment (Pass 2) while expanding the right-hand **Logs** panel to monitor per-pass elapsed/remaining times and LUT detection.
-
-https://github.com/user-attachments/assets/1d0c0cb1-a22a-404d-a16f-fb01e48e392c
-
-#### 4. Export Portable Data Package
-Right-click a synchronized and aligned dataset (e.g., an aligned `Z-Stack` or `Mosaic Z-Stack`), select **📦 Export Data Package**, choose a target directory, and inspect the generated self-contained folder (`<DatasetName>.xml`, `images/`, `trakem2.*` mipmaps, and saved alignment log).
-
-https://github.com/user-attachments/assets/9d91f4f9-c5a2-478b-b2f2-ac7db675d4d2
 
 ## Roadmap
 * **Interactive Preview & Manual Alignment Correction:** Visual preview allowing users to inspect and manually adjust tricky slice/tile alignments that cannot be solved purely mathematically.
