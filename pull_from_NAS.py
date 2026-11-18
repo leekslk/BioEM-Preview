@@ -983,9 +983,19 @@ class NASPuller(ctk.CTk):
         btn.pack(side="left", fill="x", expand=True)
 
         if is_history:
-            btn.bind("<Button-3>", lambda event, p=item_path: self.show_history_context_menu(event, p))
+            btn.bind(
+                "<Button-3>",
+                lambda event, p=item_path, t=acq_type, r=rows, c=cols: self.show_history_context_menu(
+                    event, p, acq_type=t, rows=r, cols=c
+                ),
+            )
         else:
-            btn.bind("<Button-3>", lambda event, p=item_path: self.show_context_menu(event, p))
+            btn.bind(
+                "<Button-3>",
+                lambda event, p=item_path, t=acq_type, r=rows, c=cols: self.show_context_menu(
+                    event, p, acq_type=t, rows=r, cols=c
+                ),
+            )
 
         return row_frame, btn
 
@@ -1079,25 +1089,170 @@ class NASPuller(ctk.CTk):
             self._set_action_buttons_state("disabled")
 
     # Context Menus & Local Data Management
-    def show_context_menu(self, event, path):
-        menu = tk.Menu(self, tearoff=0)
-        menu.add_command(label="🔄 Refresh Folder (Wipe & Sync)", command=lambda p=path: self.confirm_refresh(p))
-        menu.add_command(label="🗑️ Delete Local Cache", command=lambda p=path: self.show_delete_modal(p))
-        try:
-            menu.tk_popup(event.x_root, event.y_root)
-        finally:
-            menu.grab_release()
+    def _close_active_context_menu(self):
+        menu_win = getattr(self, "_active_context_menu", None)
+        if menu_win is not None:
+            try:
+                menu_win.destroy()
+            except Exception:
+                pass
+            self._active_context_menu = None
+        bind_id = getattr(self, "_ctx_outside_bind_id", None)
+        if bind_id is not None:
+            try:
+                self.unbind("<ButtonPress>", bind_id)
+            except Exception:
+                pass
+            self._ctx_outside_bind_id = None
 
-    def show_history_context_menu(self, event, path):
-        menu = tk.Menu(self, tearoff=0, font=("Arial", 10))
-        menu.add_command(label="🔄 Refresh Folder (Wipe & Sync)", command=lambda p=path: self.confirm_refresh(p))
-        menu.add_command(label="🗑️ Delete Local Cache", command=lambda p=path: self.show_delete_modal(p))
-        menu.add_separator()
-        menu.add_command(label="❌ Remove from History", command=lambda p=path: self.remove_from_history(p))
+    def _popup_context_menu(self, event, items):
+        """
+        Displays a Fluent left-aligned popup menu with fixed-width icon columns
+        so icon-to-text spacing and left alignment remain consistent.
+        `items` is a list of (icon, label, callback) tuples or "---" separators.
+        """
+        self._close_active_context_menu()
+
+        menu_win = ctk.CTkToplevel(self)
+        menu_win.withdraw()
+        menu_win.overrideredirect(True)
+        menu_win.attributes("-topmost", True)
+        self._active_context_menu = menu_win
+
+        outer = ctk.CTkFrame(menu_win, fg_color="#d0d0d0", corner_radius=8)
+        outer.pack(fill="both", expand=True)
+        inner = ctk.CTkFrame(outer, fg_color="#ffffff", corner_radius=7)
+        inner.pack(fill="both", expand=True, padx=1, pady=1)
+
+        def _invoke(cb):
+            self._close_active_context_menu()
+            if cb:
+                cb()
+
+        for entry in items:
+            if entry == "---":
+                sep = ctk.CTkFrame(inner, height=1, fg_color="#e6e6e6")
+                sep.pack(fill="x", padx=8, pady=4)
+                continue
+
+            icon_txt, label_txt, callback = entry
+            row = ctk.CTkFrame(inner, fg_color="#ffffff", corner_radius=5, height=30)
+            row.pack(fill="x", padx=4, pady=2)
+            row.grid_columnconfigure(1, weight=1)
+
+            icon_lbl = ctk.CTkLabel(
+                row,
+                text=icon_txt,
+                width=24,
+                font=("Segoe UI", 11),
+                text_color="#222222",
+                anchor="center",
+            )
+            icon_lbl.grid(row=0, column=0, padx=(6, 4), pady=4, sticky="w")
+
+            text_lbl = ctk.CTkLabel(
+                row,
+                text=label_txt,
+                font=("Segoe UI", 11),
+                text_color="#111111",
+                anchor="w",
+            )
+            text_lbl.grid(row=0, column=1, padx=(0, 12), pady=4, sticky="ew")
+
+            def _on_enter(_e, r=row):
+                r.configure(fg_color="#eef4fb")
+
+            def _on_leave(_e, r=row):
+                r.configure(fg_color="#ffffff")
+
+            for widget in (row, icon_lbl, text_lbl):
+                widget.bind("<Enter>", _on_enter)
+                widget.bind("<Leave>", _on_leave)
+                widget.bind("<Button-1>", lambda _e, cb=callback: _invoke(cb))
+
+        menu_win.update_idletasks()
+        req_w = max(235, menu_win.winfo_reqwidth())
+        req_h = menu_win.winfo_reqheight()
+        scr_w = self.winfo_screenwidth()
+        scr_h = self.winfo_screenheight()
+        pos_x = min(event.x_root, scr_w - req_w - 8)
+        pos_y = min(event.y_root, scr_h - req_h - 8)
+        menu_win.geometry(f"{req_w}x{req_h}+{pos_x}+{pos_y}")
+        menu_win.deiconify()
+        menu_win.focus_force()
+
+        menu_win.bind("<Escape>", lambda _e: self._close_active_context_menu())
+        menu_win.bind(
+            "<FocusOut>",
+            lambda _e: self.after(50, self._dismiss_if_unfocused),
+        )
+        self._ctx_outside_bind_id = self.bind(
+            "<ButtonPress>", lambda _e: self._close_active_context_menu(), add="+"
+        )
+
+    def _dismiss_if_unfocused(self):
+        menu_win = getattr(self, "_active_context_menu", None)
+        if menu_win is None:
+            return
         try:
-            menu.tk_popup(event.x_root, event.y_root)
-        finally:
-            menu.grab_release()
+            focused = menu_win.focus_get()
+            if focused is None or focused.winfo_toplevel() != menu_win:
+                self._close_active_context_menu()
+        except Exception:
+            self._close_active_context_menu()
+
+    def _build_dataset_menu_items(self, path, acq_type="z-stack", rows=1, cols=1, include_remove=False):
+        items = [
+            (
+                "📁",
+                "Show Folder",
+                lambda p=path, t=acq_type, r=rows, c=cols: self.run_sync(
+                    p, acq_type=t, rows=r, cols=c, post_action="show_folder"
+                ),
+            ),
+        ]
+        if acq_type == "z-stack":
+            items.append(
+                (
+                    "📐",
+                    "Align and Display",
+                    lambda p=path: self.run_sync(
+                        p, acq_type="z-stack", rows=1, cols=1, post_action="align_z"
+                    ),
+                )
+            )
+        items.extend([
+            "---",
+            ("🔄", "Refresh Folder (Wipe & Sync)", lambda p=path: self.confirm_refresh(p)),
+            ("🧹", "Delete Local Cache", lambda p=path: self.show_delete_modal(p)),
+        ])
+        if include_remove:
+            items.extend([
+                "---",
+                ("✖", "Remove from History", lambda p=path: self.remove_from_history(p)),
+            ])
+        return items
+
+    def show_context_menu(self, event, path, acq_type="z-stack", rows=1, cols=1):
+        items = self._build_dataset_menu_items(
+            path, acq_type=acq_type, rows=rows, cols=cols, include_remove=False
+        )
+        self._popup_context_menu(event, items)
+
+    def show_history_context_menu(self, event, path, acq_type="z-stack", rows=1, cols=1):
+        items = self._build_dataset_menu_items(
+            path, acq_type=acq_type, rows=rows, cols=cols, include_remove=True
+        )
+        self._popup_context_menu(event, items)
+
+    def _open_in_explorer(self, folder_path):
+        norm_path = os.path.normpath(folder_path)
+        if sys.platform == "win32":
+            os.startfile(norm_path)
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", norm_path])
+        else:
+            subprocess.Popen(["xdg-open", norm_path])
 
     def show_delete_modal(self, source_path):
         project_name, safe_folder_name, _ = self._extract_project_and_folder(source_path)
@@ -1304,7 +1459,7 @@ class NASPuller(ctk.CTk):
             except Exception:
                 pass
 
-    def run_sync(self, source_folder, acq_type="auto", rows=1, cols=1):
+    def run_sync(self, source_folder, acq_type="auto", rows=1, cols=1, post_action="default"):
         if self._is_busy:
             return
         if not os.path.exists(source_folder):
@@ -1317,12 +1472,12 @@ class NASPuller(ctk.CTk):
 
         worker = threading.Thread(
             target=self._sync_and_process_worker,
-            args=(source_folder, acq_type, rows, cols),
+            args=(source_folder, acq_type, rows, cols, post_action),
             daemon=True,
         )
         worker.start()
 
-    def _sync_and_process_worker(self, source_folder, acq_type, rows, cols):
+    def _sync_and_process_worker(self, source_folder, acq_type, rows, cols, post_action="default"):
         project_name, safe_folder_name, display_title = self._extract_project_and_folder(source_folder)
         dest_root = get_sync_cache_root(self.config.get("destination_dir", DESTINATION_DIR))
         final_dest = os.path.join(dest_root, safe_folder_name)
@@ -1401,8 +1556,22 @@ class NASPuller(ctk.CTk):
             )
             self.after(0, lambda: self.save_history(source_folder))
 
-            # WORKFLOW 1: Simple Z-Stack -> Fiji Virtual Stack
-            if acq_type == "z-stack":
+            # CONTEXT ACTION 1: Sync & Show Folder in Explorer
+            if post_action == "show_folder":
+                self._open_in_explorer(final_dest)
+                self._append_action_log(f"[Explorer] Opened synced folder: {final_dest}")
+                stamp = time.strftime("%H:%M")
+                self.after(0, lambda: (
+                    self.progress.set(1.0),
+                    self.status.configure(text=f"✅ Synced & opened folder: {safe_folder_name}", text_color="#2ecc71"),
+                    self.latest_path_label.configure(
+                        text=f"Show Folder: {display_title} [{stamp}]", text_color="#2ecc71"
+                    ),
+                ))
+                return
+
+            # WORKFLOW 1: Simple Z-Stack -> Fiji Virtual Stack (unless explicit Z-alignment requested)
+            if acq_type == "z-stack" and post_action != "align_z":
                 self.launch_fiji_virtual_stack(final_dest, project_name=project_name)
                 self._append_action_log("[Fiji] Dispatched Z-Stack to BioEM_Watcher.ijm (Virtual Stack).")
                 stamp = time.strftime("%H:%M")
@@ -1411,11 +1580,13 @@ class NASPuller(ctk.CTk):
                 ))
                 return
 
-            # WORKFLOW 2: Mosaic / Mosaic Z-Stack -> PyTorch Aligner -> TrakEM2 XML -> Fiji
-            self.after(0, lambda: (
+            # WORKFLOW 2: Mosaic / Mosaic Z-Stack / Z-Stack (Align & Display) -> PyTorch Aligner -> TrakEM2 XML -> Fiji
+            align_label = "Z-Align" if acq_type == "z-stack" else f"{acq_type}, {rows}x{cols}"
+            self.after(0, lambda lbl=align_label: (
                 self.progress.set(0.02),
                 self.latest_path_label.configure(
-                    text=f"Aligning ({acq_type}, {rows}x{cols}): {display_title}", text_color="#e74c3c" if acq_type == "mosaic-z" else "#e67e22"
+                    text=f"Aligning ({lbl}): {display_title}",
+                    text_color="#2ecc71" if acq_type == "z-stack" else ("#e74c3c" if acq_type == "mosaic-z" else "#e67e22"),
                 ),
                 self.status.configure(text="Checking PyTorch alignment engine...", text_color="#333333"),
             ))

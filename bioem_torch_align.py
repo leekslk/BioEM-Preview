@@ -572,6 +572,7 @@ def align_z_pair_rigid(ref_tiles, ref_pos_2d, mov_tiles, mov_pos_2d, tile_w, til
     cy_local = tile_h / 2.0
     n_devs = len(devices)
     workers = n_devs * 2 if devices[0].type == "cuda" else 4
+    ds = 4 if max(tile_w, tile_h) >= 2048 else (2 if max(tile_w, tile_h) >= 512 else 1)
 
     def _match_z_tile(job):
         idx, rc = job
@@ -579,14 +580,15 @@ def align_z_pair_rigid(ref_tiles, ref_pos_2d, mov_tiles, mov_pos_2d, tile_w, til
         img_ref = tifffile.imread(ref_tiles[rc])[margin_y:tile_h - margin_y, margin_x:tile_w - margin_x]
         img_mov = tifffile.imread(mov_tiles[rc])[margin_y:tile_h - margin_y, margin_x:tile_w - margin_x]
 
-        dx, dy, snr = _torch_phase_correlate(img_ref, img_mov, dev, downsample=4)
+        dx, dy, snr = _torch_phase_correlate(img_ref, img_mov, dev, downsample=ds)
         if snr < min_snr or math.hypot(dx, dy) > max(tile_w, tile_h) * 0.25:
             return None
 
         rx, ry = ref_pos_2d[rc]
         mx, my = mov_pos_2d[rc]
-        p_ref = (rx + cx_local, ry + cy_local)
-        q_in_mov_frame = (mx + cx_local + dx, my + cy_local + dy)
+        # dx = x_ref - x_mov shifts mov onto ref: moving point q_mov lands at q_ref = (rx+cx+dx, ry+cy+dy)
+        q_in_mov_frame = (mx + cx_local, my + cy_local)
+        p_ref = (rx + cx_local + dx, ry + cy_local + dy)
         return q_in_mov_frame, p_ref
 
     Q_pts, P_pts = [], []
@@ -918,7 +920,15 @@ def run_pipeline(
             tiles_by_z.setdefault(z, {})[(r, c)] = full_p
 
     if not tiles_by_z:
-        raise RuntimeError("No files matched Tile_XXX-XXX-XXXXXX pattern.")
+        if mode == "z-stack" and (rows * cols) <= 1:
+            def _nat_key(p):
+                return [int(tok) if tok.isdigit() else tok.lower() for tok in re.split(r"(\d+)", os.path.basename(p))]
+            for z_idx, full_p in enumerate(sorted(tile_files, key=_nat_key), start=1):
+                if first_path is None:
+                    first_path = full_p
+                tiles_by_z[z_idx] = {(1, 1): full_p}
+        else:
+            raise RuntimeError("No files matched Tile_XXX-XXX-XXXXXX pattern.")
 
     with tifffile.TiffFile(first_path) as tf:
         page = tf.pages[0]
