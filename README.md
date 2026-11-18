@@ -17,7 +17,11 @@ Moving large SBF-SEM tile streams across the network and configuring alignment p
 * *Z-stacks open straight into Fiji as virtual stacks (with optional Z-align); Mosaics and Mosaic Z-stacks are automatically aligned and opened as TrakEM2 projects, ready for portable one-click package export.*
 
 ## System Architecture
-![BioEM Preview System Architecture](docs/system_architecture.svg)
+<p align="center">
+  <img src="docs/system_architecture.svg" width="100%" alt="BioEM Preview System Architecture">
+</p>
+
+> Editable source: [docs/system_architecture.drawio](docs/system_architecture.drawio) (open directly in [diagrams.net / draw.io](https://app.diagrams.net/)).
 
 ## Core Features
 * **First-Run Setup Wizard & Settings:** On first launch, prompts for your scratch SSD (`DESTINATION_DIR`), NAS drive (`NAS_DIR`), and Fiji executable (`APP_PATH`) with sensible defaults. Automatically places `BioEM_Watcher.ijm` inside Fiji, manages the background NAS crawler (`--indexer`) at login, and restarts stale indexers automatically on version updates.
