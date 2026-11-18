@@ -54,7 +54,9 @@ BioEM Preview ($BuildName) - Quick Start
 "@
     Set-Content -Path "$OutDir\README_QUICKSTART.txt" -Value $QuickStart -Encoding UTF8
 
-    $ZipPath = "dist\$BuildName.zip"
+    $Suffix = $env:BIOEM_ZIP_SUFFIX
+    $ZipName = if ($Suffix) { "$BuildName-$Suffix.zip" } else { "$BuildName.zip" }
+    $ZipPath = "dist\$ZipName"
     Write-Host "Creating self-contained archive: $ZipPath ..." -ForegroundColor Cyan
     Compress-Archive -Path $OutDir -DestinationPath $ZipPath -CompressionLevel Optimal
 
