@@ -1,165 +1,165 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="1850" height="870" viewBox="0 0 1850 870" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" width="1230" height="1735" viewBox="0 0 1230 1735" font-family="-apple-system, BlinkMacSystemFont, Segoe UI, Helvetica, Arial, sans-serif">
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M 0 1 L 10 5 L 0 9 z" fill="#58a6ff"/>
     </marker>
   </defs>
-  <rect x="0" y="0" width="1850" height="870" fill="#0d1117"/>
-  <rect x="20" y="20" width="530" height="560" rx="8" fill="#161b22" stroke="#484f58" stroke-width="1.6"/>
-  <path d="M 20 54 L 550 54" stroke="#484f58" stroke-width="1.2"/>
-  <text x="285.0" y="42.0" text-anchor="middle" fill="#f0f6fc" font-size="15" font-weight="700">1. Discovery, Sync &amp; Packaging</text>
-  <rect x="32" y="66" width="194" height="498" rx="6" fill="none" stroke="#484f58" stroke-width="1.3" stroke-dasharray="5,4"/>
-  <path d="M 32 94 L 226 94" stroke="#484f58" stroke-width="1" stroke-dasharray="4,3"/>
-  <text x="129.0" y="85.0" text-anchor="middle" fill="#8b949e" font-size="12.5" font-weight="700">Physical Storage &amp; Exports</text>
-  <rect x="44" y="104" width="170" height="54" rx="6" fill="#21262d" stroke="#484f58" stroke-width="1.5"/>
-  <text x="129.0" y="126.0" text-anchor="middle" fill="#e6edf3" font-size="13.5" font-weight="700">MAPS Acquisition</text>
-  <text x="129.0" y="144.0" text-anchor="middle" fill="#c9d1d9" font-size="12.5">(Z-Stack / Mosaic / Mosaic-Z)</text>
-  <path d="M 49 210 L 49 260 A 80.0 10 0 0 0 209 260 L 209 210 Z" fill="#0d2b45" stroke="#58a6ff" stroke-width="2"/>
-  <ellipse cx="129.0" cy="210" rx="80.0" ry="10" fill="#0d2b45" stroke="#58a6ff" stroke-width="2"/>
-  <text x="129.0" y="236.0" text-anchor="middle" fill="#e6edf3" font-size="12.5" font-weight="700">Network Storage</text>
-  <text x="129.0" y="252.0" text-anchor="middle" fill="#e6edf3" font-size="12.5">(I:/Maps)</text>
-  <path d="M 49 330 L 49 384 A 80.0 10 0 0 0 209 384 L 209 330 Z" fill="#132e21" stroke="#2ecc71" stroke-width="2"/>
-  <ellipse cx="129.0" cy="330" rx="80.0" ry="10" fill="#132e21" stroke="#2ecc71" stroke-width="2"/>
-  <text x="129.0" y="358.0" text-anchor="middle" fill="#e6edf3" font-size="12.5" font-weight="700">Local Scratch SSD</text>
-  <text x="129.0" y="374.0" text-anchor="middle" fill="#e6edf3" font-size="12.5">(D:/&lt;Dataset&gt;)</text>
-  <rect x="44" y="452" width="170" height="86" rx="6" fill="#21262d" stroke="#484f58" stroke-width="1.5"/>
-  <text x="129.0" y="481.0" text-anchor="middle" fill="#e6edf3" font-size="13.5" font-weight="700">Export Data Package</text>
-  <text x="129.0" y="499.0" text-anchor="middle" fill="#c9d1d9" font-size="12.5">&lt;Pkg&gt;/images/, .xml,</text>
-  <text x="129.0" y="517.0" text-anchor="middle" fill="#c9d1d9" font-size="12.5">mipmaps &amp; action.log</text>
-  <rect x="320" y="66" width="198" height="498" rx="8" fill="#1c2128" stroke="#30363d" stroke-width="1.3"/>
-  <path d="M 320 94 L 518 94" stroke="#30363d" stroke-width="1.2"/>
-  <text x="419.0" y="85.0" text-anchor="middle" fill="#f0f6fc" font-size="12.5" font-weight="700">Control, State &amp; UI</text>
-  <rect x="330" y="104" width="178" height="54" rx="6" fill="#21262d" stroke="#484f58" stroke-width="1.5"/>
-  <text x="419.0" y="126.0" text-anchor="middle" fill="#e6edf3" font-size="13.5" font-weight="700">nas_indexer.py</text>
-  <text x="419.0" y="144.0" text-anchor="middle" fill="#c9d1d9" font-size="12.5">(--indexer auto-restart)</text>
-  <path d="M 330 220 L 330 278 A 89.0 10 0 0 0 508 278 L 508 220 Z" fill="#21262d" stroke="#484f58" stroke-width="2"/>
-  <ellipse cx="419.0" cy="220" rx="89.0" ry="10" fill="#21262d" stroke="#484f58" stroke-width="2"/>
-  <text x="419.0" y="242.0" text-anchor="middle" fill="#e6edf3" font-size="12.5" font-weight="700">%APPDATA%/BioEM_Preview/</text>
-  <text x="419.0" y="258.0" text-anchor="middle" fill="#e6edf3" font-size="12.5">cache, aligned_datasets,</text>
-  <text x="419.0" y="274.0" text-anchor="middle" fill="#e6edf3" font-size="12.5">dataset_logs/</text>
-  <rect x="330" y="340" width="178" height="78" rx="6" fill="#21262d" stroke="#484f58" stroke-width="1.5"/>
-  <text x="419.0" y="365.0" text-anchor="middle" fill="#e6edf3" font-size="13.5" font-weight="700">Preview_beta.exe</text>
-  <text x="419.0" y="383.0" text-anchor="middle" fill="#c9d1d9" font-size="12.5">Badges, Logs Drawer,</text>
-  <text x="419.0" y="401.0" text-anchor="middle" fill="#c9d1d9" font-size="12.5">Setup Wizard</text>
-  <rect x="330" y="452" width="178" height="86" rx="6" fill="#21262d" stroke="#484f58" stroke-width="1.5"/>
-  <text x="419.0" y="481.0" text-anchor="middle" fill="#e6edf3" font-size="13.5" font-weight="700">Right-Click Menu</text>
-  <text x="419.0" y="499.0" text-anchor="middle" fill="#c9d1d9" font-size="12.5">Show Folder | Align Z</text>
-  <text x="419.0" y="517.0" text-anchor="middle" fill="#c9d1d9" font-size="12.5">Export Pkg | Refresh</text>
-  <rect x="640" y="21.5" width="320" height="155" rx="8" fill="#161b22" stroke="#a371f7" stroke-width="2"/>
-  <path d="M 640 55.5 L 960 55.5" stroke="#a371f7" stroke-width="1.2"/>
-  <text x="800.0" y="43.5" text-anchor="middle" fill="#d2a8ff" font-size="15" font-weight="700">2A. PyTorch Runtime (bioem_engine.py)</text>
-  <rect x="656" y="69.5" width="288" height="86" rx="6" fill="#21262d" stroke="#484f58" stroke-width="1.5"/>
-  <text x="800.0" y="98.5" text-anchor="middle" fill="#e6edf3" font-size="13.5" font-weight="700">On-Demand uv Bootstrapper</text>
-  <text x="800.0" y="116.5" text-anchor="middle" fill="#c9d1d9" font-size="12.5">Installs isolated CUDA / CPU PyTorch venv:</text>
-  <text x="800.0" y="134.5" text-anchor="middle" fill="#c9d1d9" font-size="12.5">%LOCALAPPDATA%/BioEM_Preview/runtime/</text>
-  <rect x="640" y="200" width="320" height="380" rx="8" fill="#161b22" stroke="#1f6feb" stroke-width="2"/>
-  <path d="M 640 234 L 960 234" stroke="#1f6feb" stroke-width="1.2"/>
-  <text x="800.0" y="222.0" text-anchor="middle" fill="#58a6ff" font-size="15" font-weight="700">2B. Metadata Check &amp; Z-Stack Routing</text>
-  <rect x="656" y="252" width="288" height="76" rx="6" fill="#21262d" stroke="#484f58" stroke-width="1.5"/>
-  <text x="800.0" y="276.0" text-anchor="middle" fill="#e6edf3" font-size="13.5" font-weight="700">1st TIFF Header Check (bioem_config.py)</text>
-  <text x="800.0" y="294.0" text-anchor="middle" fill="#c9d1d9" font-size="12.5">Tag 34682 DigitalContrast:</text>
-  <text x="800.0" y="312.0" text-anchor="middle" fill="#c9d1d9" font-size="12.5">-1 = Keep LUT | +1 = Invert LUT</text>
-  <rect x="670" y="366" width="260" height="58" rx="6" fill="#21262d" stroke="#484f58" stroke-width="1.5"/>
-  <text x="800.0" y="390.0" text-anchor="middle" fill="#e6edf3" font-size="13.5" font-weight="700">fiji_trigger.txt</text>
-  <text x="800.0" y="408.0" text-anchor="middle" fill="#c9d1d9" font-size="12.5">...|z-stack|1|1|invert=0/1</text>
-  <rect x="660" y="466" width="280" height="74" rx="6" fill="#21262d" stroke="#484f58" stroke-width="1.5"/>
-  <text x="800.0" y="498.0" text-anchor="middle" fill="#e6edf3" font-size="13.5" font-weight="700">BioEM_Watcher.ijm (AutoRun)</text>
-  <text x="800.0" y="516.0" text-anchor="middle" fill="#c9d1d9" font-size="12.5">Virtual Stack + Conditional Invert LUT</text>
-  <rect x="1060" y="20" width="400" height="560" rx="8" fill="#161b22" stroke="#484f58" stroke-width="1.6"/>
-  <path d="M 1060 54 L 1460 54" stroke="#484f58" stroke-width="1.2"/>
-  <text x="1260.0" y="42.0" text-anchor="middle" fill="#f0f6fc" font-size="15" font-weight="700">3. PyTorch GPU/CPU Alignment Engine</text>
-  <rect x="1080" y="68" width="360" height="62" rx="6" fill="#21262d" stroke="#484f58" stroke-width="1.5"/>
-  <text x="1260.0" y="94.0" text-anchor="middle" fill="#e6edf3" font-size="13.5" font-weight="700">bioem_torch_align.py</text>
-  <text x="1260.0" y="112.0" text-anchor="middle" fill="#c9d1d9" font-size="12.5">Inspect 1st TIFF DigitalContrast &amp; grid (RxC, z=N)</text>
-  <rect x="1080" y="158" width="360" height="68" rx="6" fill="#21262d" stroke="#484f58" stroke-width="1.5"/>
-  <text x="1260.0" y="187.0" text-anchor="middle" fill="#e6edf3" font-size="13.5" font-weight="700">Pass 1: 2D Intra-Section Montaging</text>
-  <text x="1260.0" y="205.0" text-anchor="middle" fill="#c9d1d9" font-size="12.5">Coarse-to-fine FFT phase corr (-dx, -dy) + IRLS/LSQR</text>
-  <rect x="1080" y="254" width="360" height="72" rx="6" fill="#21262d" stroke="#484f58" stroke-width="1.5"/>
-  <text x="1260.0" y="285.0" text-anchor="middle" fill="#e6edf3" font-size="13.5" font-weight="700">Pass 2: Layer-as-Rigid-Unit Z-Align</text>
-  <text x="1260.0" y="303.0" text-anchor="middle" fill="#c9d1d9" font-size="12.5">Procrustes RANSAC (align_z_pair_rigid, cumulative fit)</text>
-  <rect x="1080" y="356" width="360" height="78" rx="6" fill="#21262d" stroke="#484f58" stroke-width="1.5"/>
-  <text x="1260.0" y="390.0" text-anchor="middle" fill="#e6edf3" font-size="13.5" font-weight="700">Pass 3: Native TrakEM2 XML &amp; Logs</text>
-  <text x="1260.0" y="408.0" text-anchor="middle" fill="#c9d1d9" font-size="12.5">filter_enabled/invert, int filter_min/max + dataset_logs/</text>
-  <rect x="1105" y="476" width="310" height="68" rx="6" fill="#21262d" stroke="#484f58" stroke-width="1.5"/>
-  <text x="1260.0" y="505.0" text-anchor="middle" fill="#e6edf3" font-size="13.5" font-weight="700">Fiji (Java 8) / TrakEM2</text>
-  <text x="1260.0" y="523.0" text-anchor="middle" fill="#c9d1d9" font-size="12.5">Direct Display, Mipmaps &amp; Inspection</text>
-  <rect x="640" y="600" width="1190" height="250" rx="8" fill="#161b22" stroke="#484f58" stroke-width="1.6"/>
-  <path d="M 640 634 L 1830 634" stroke="#484f58" stroke-width="1.2"/>
-  <text x="1235.0" y="622.0" text-anchor="middle" fill="#f0f6fc" font-size="15" font-weight="700">4. Supported Workflows &amp; Contextual Outputs</text>
-  <rect x="665" y="690" width="270" height="140" rx="6" fill="#1e3a2f" stroke="#2ecc71" stroke-width="2"/>
-  <text x="800.0" y="728.0" text-anchor="middle" fill="#e8f5e9" font-size="13.5" font-weight="700">Workflow 1: Z-Stack</text>
-  <text x="800.0" y="746.0" text-anchor="middle" fill="#e8f5e9" font-size="12.5">(Single tile, serial sections)</text>
-  <text x="800.0" y="782.0" text-anchor="middle" fill="#e8f5e9" font-size="12.5">Default: Virtual Stack (auto Invert LUT)</text>
-  <text x="800.0" y="800.0" text-anchor="middle" fill="#e8f5e9" font-size="12.5">Right-Click: Align &amp; Display (Pass 2 + 3)</text>
-  <rect x="954" y="690" width="270" height="140" rx="6" fill="#3b2912" stroke="#e67e22" stroke-width="2"/>
-  <text x="1089.0" y="728.0" text-anchor="middle" fill="#fef5e7" font-size="13.5" font-weight="700">Workflow 2: 2D Mosaic</text>
-  <text x="1089.0" y="746.0" text-anchor="middle" fill="#fef5e7" font-size="12.5">(Multiple tiles, single layer)</text>
-  <text x="1089.0" y="782.0" text-anchor="middle" fill="#fef5e7" font-size="12.5">Action: Pass 1 (2D Montage) + Pass 3</text>
-  <text x="1089.0" y="800.0" text-anchor="middle" fill="#fef5e7" font-size="12.5">TrakEM2 .xml + Fiji + Export</text>
-  <rect x="1243" y="690" width="270" height="140" rx="6" fill="#3e1b18" stroke="#e74c3c" stroke-width="2"/>
-  <text x="1378.0" y="728.0" text-anchor="middle" fill="#fdedec" font-size="13.5" font-weight="700">Workflow 3: Mosaic Z-Stack</text>
-  <text x="1378.0" y="746.0" text-anchor="middle" fill="#fdedec" font-size="12.5">(Multiple tiles, serial sections)</text>
-  <text x="1378.0" y="782.0" text-anchor="middle" fill="#fdedec" font-size="12.5">Action: Pass 1 (2D) + Pass 2 (Z) + Pass 3</text>
-  <text x="1378.0" y="800.0" text-anchor="middle" fill="#fdedec" font-size="12.5">TrakEM2 .xml + Fiji + Export</text>
-  <rect x="1530" y="690" width="275" height="140" rx="6" fill="#182b3a" stroke="#58a6ff" stroke-width="2"/>
-  <text x="1667.5" y="728.0" text-anchor="middle" fill="#eef6ff" font-size="13.5" font-weight="700">Contextual Package Export</text>
-  <text x="1667.5" y="746.0" text-anchor="middle" fill="#eef6ff" font-size="12.5">(Synced + Aligned + Saved .xml)</text>
-  <text x="1667.5" y="782.0" text-anchor="middle" fill="#eef6ff" font-size="12.5">Copies images/, mipmaps &amp; logs</text>
-  <text x="1667.5" y="800.0" text-anchor="middle" fill="#eef6ff" font-size="12.5">Rewrites portable relative .xml</text>
-  <path d="M 129 158 L 129 198" fill="none" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)"/>
-  <path d="M 129 270 L 129 318" fill="none" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)"/>
-  <rect x="86.0" y="283" width="86.0" height="18" rx="4" fill="#0d1117" stroke="#30363d" stroke-width="0.8"/>
-  <text x="129" y="296" text-anchor="middle" fill="#f0f6fc" font-size="12" font-weight="700">Delta Sync</text>
-  <path d="M 129 394 L 129 450" fill="none" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)"/>
-  <rect x="82.4" y="411" width="93.2" height="18" rx="4" fill="#0d1117" stroke="#30363d" stroke-width="0.8"/>
-  <text x="129" y="424" text-anchor="middle" fill="#f0f6fc" font-size="12" font-weight="700">Export Copy</text>
-  <path d="M 330 131 L 268 131 L 268 235 L 211 235" fill="none" stroke="#58a6ff" stroke-width="2" stroke-dasharray="6,4" marker-end="url(#arrow)"/>
-  <rect x="243.0" y="171" width="50.0" height="18" rx="4" fill="#0d1117" stroke="#30363d" stroke-width="0.8"/>
-  <text x="268" y="184" text-anchor="middle" fill="#f0f6fc" font-size="12" font-weight="700">Scans</text>
-  <path d="M 419 158 L 419 208" fill="none" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)"/>
-  <rect x="368.8" y="173" width="100.4" height="18" rx="4" fill="#0d1117" stroke="#30363d" stroke-width="0.8"/>
-  <text x="419" y="186" text-anchor="middle" fill="#f0f6fc" font-size="12" font-weight="700">Update Index</text>
-  <path d="M 419 288 L 419 338" fill="none" stroke="#58a6ff" stroke-width="2" stroke-dasharray="6,4" marker-end="url(#arrow)"/>
-  <rect x="397.6" y="302" width="42.8" height="18" rx="4" fill="#0d1117" stroke="#30363d" stroke-width="0.8"/>
-  <text x="419" y="315" text-anchor="middle" fill="#f0f6fc" font-size="12" font-weight="700">Poll</text>
-  <path d="M 330 379 L 268 379 L 268 357 L 211 357" fill="none" stroke="#58a6ff" stroke-width="2" stroke-dasharray="6,4" marker-end="url(#arrow)"/>
-  <rect x="246.6" y="357" width="42.8" height="18" rx="4" fill="#0d1117" stroke="#30363d" stroke-width="0.8"/>
-  <text x="268" y="370" text-anchor="middle" fill="#f0f6fc" font-size="12" font-weight="700">Sync</text>
-  <path d="M 330 495 L 216 495" fill="none" stroke="#58a6ff" stroke-width="2" stroke-dasharray="6,4" marker-end="url(#arrow)"/>
-  <rect x="222.8" y="484" width="100.4" height="18" rx="4" fill="#0d1117" stroke="#30363d" stroke-width="0.8"/>
-  <text x="273" y="497" text-anchor="middle" fill="#f0f6fc" font-size="12" font-weight="700">Rewrite .xml</text>
-  <path d="M 508 360 L 560 360 L 560 112 L 654 112" fill="none" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)"/>
-  <rect x="535.0" y="189" width="50.0" height="18" rx="4" fill="#0d1117" stroke="#30363d" stroke-width="0.8"/>
-  <text x="560" y="202" text-anchor="middle" fill="#f0f6fc" font-size="12" font-weight="700">Align</text>
-  <path d="M 944 100 L 1078 100" fill="none" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)"/>
-  <rect x="968.0" y="89" width="86.0" height="18" rx="4" fill="#0d1117" stroke="#30363d" stroke-width="0.8"/>
-  <text x="1011" y="102" text-anchor="middle" fill="#f0f6fc" font-size="12" font-weight="700">Subprocess</text>
-  <path d="M 508 398 L 585 398 L 585 290 L 654 290" fill="none" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)"/>
-  <rect x="552.8" y="333" width="64.4" height="18" rx="4" fill="#0d1117" stroke="#30363d" stroke-width="0.8"/>
-  <text x="585" y="346" text-anchor="middle" fill="#f0f6fc" font-size="12" font-weight="700">Z-Stack</text>
-  <path d="M 800 328 L 800 364" fill="none" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)"/>
-  <rect x="764.2" y="335" width="71.6" height="18" rx="4" fill="#0d1117" stroke="#30363d" stroke-width="0.8"/>
-  <text x="800" y="348" text-anchor="middle" fill="#f0f6fc" font-size="12" font-weight="700">1st .tif</text>
-  <path d="M 800 424 L 800 464" fill="none" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)"/>
-  <rect x="749.8" y="433" width="100.4" height="18" rx="4" fill="#0d1117" stroke="#30363d" stroke-width="0.8"/>
-  <text x="800" y="446" text-anchor="middle" fill="#f0f6fc" font-size="12" font-weight="700">AutoRun Poll</text>
-  <path d="M 1260 130 L 1260 156" fill="none" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)"/>
-  <path d="M 1260 226 L 1260 252" fill="none" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)"/>
-  <path d="M 1260 326 L 1260 354" fill="none" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)"/>
-  <path d="M 1260 434 L 1260 474" fill="none" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)"/>
-  <rect x="1220.6" y="443" width="78.8" height="18" rx="4" fill="#0d1117" stroke="#30363d" stroke-width="0.8"/>
-  <text x="1260" y="456" text-anchor="middle" fill="#f0f6fc" font-size="12" font-weight="700">Open .xml</text>
-  <path d="M 800 580 L 800 688" fill="none" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)"/>
-  <rect x="710.2" y="649" width="179.6" height="18" rx="4" fill="#0d1117" stroke="#30363d" stroke-width="0.8"/>
-  <text x="800" y="662" text-anchor="middle" fill="#f0f6fc" font-size="12" font-weight="700">Virtual Stack (Z-Stack)</text>
-  <path d="M 1105 510 L 1048 510 L 1048 662 L 1089 662 L 1089 688" fill="none" stroke="#58a6ff" stroke-width="2" stroke-dasharray="6,4" marker-end="url(#arrow)"/>
-  <rect x="974.0" y="651" width="230.0" height="18" rx="4" fill="#0d1117" stroke="#30363d" stroke-width="0.8"/>
-  <text x="1089" y="664" text-anchor="middle" fill="#f0f6fc" font-size="12" font-weight="700">2D Spatial Mosaic (Pass 1 + 3)</text>
-  <path d="M 1260 544 L 1260 588 L 1410 588 L 1410 662 L 1378 662 L 1378 688" fill="none" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)"/>
-  <rect x="1259.4" y="651" width="237.2" height="18" rx="4" fill="#0d1117" stroke="#30363d" stroke-width="0.8"/>
-  <text x="1378" y="664" text-anchor="middle" fill="#f0f6fc" font-size="12" font-weight="700">Mosaic Z-Stack (Pass 1 + 2 + 3)</text>
-  <path d="M 1415 510 L 1667.5 510 L 1667.5 688" fill="none" stroke="#58a6ff" stroke-width="2" stroke-dasharray="6,4" marker-end="url(#arrow)"/>
-  <rect x="1602.9" y="651" width="129.2" height="18" rx="4" fill="#0d1117" stroke="#30363d" stroke-width="0.8"/>
-  <text x="1667.5" y="664" text-anchor="middle" fill="#f0f6fc" font-size="12" font-weight="700">Saved .xml + Log</text>
+  <rect x="0" y="0" width="1230" height="1735" fill="#0d1117"/>
+  <rect x="310" y="20" width="530" height="560" rx="8" fill="#161b22" stroke="#484f58" stroke-width="1.6"/>
+  <path d="M 310 54 L 840 54" stroke="#484f58" stroke-width="1.2"/>
+  <text x="575.0" y="42.0" text-anchor="middle" fill="#f0f6fc" font-size="15" font-weight="700">1. Discovery, Sync &amp; Packaging</text>
+  <rect x="322" y="66" width="194" height="498" rx="6" fill="none" stroke="#484f58" stroke-width="1.3" stroke-dasharray="5,4"/>
+  <path d="M 322 94 L 516 94" stroke="#484f58" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="419.0" y="85.0" text-anchor="middle" fill="#8b949e" font-size="12.5" font-weight="700">Physical Storage &amp; Exports</text>
+  <rect x="334" y="104" width="170" height="54" rx="6" fill="#21262d" stroke="#484f58" stroke-width="1.5"/>
+  <text x="419.0" y="126.0" text-anchor="middle" fill="#e6edf3" font-size="13.5" font-weight="700">MAPS Acquisition</text>
+  <text x="419.0" y="144.0" text-anchor="middle" fill="#c9d1d9" font-size="12.5">(Z-Stack / Mosaic / Mosaic-Z)</text>
+  <path d="M 339 210 L 339 260 A 80.0 10 0 0 0 499 260 L 499 210 Z" fill="#0d2b45" stroke="#58a6ff" stroke-width="2"/>
+  <ellipse cx="419.0" cy="210" rx="80.0" ry="10" fill="#0d2b45" stroke="#58a6ff" stroke-width="2"/>
+  <text x="419.0" y="236.0" text-anchor="middle" fill="#e6edf3" font-size="12.5" font-weight="700">Network Storage</text>
+  <text x="419.0" y="252.0" text-anchor="middle" fill="#e6edf3" font-size="12.5">(I:/Maps)</text>
+  <path d="M 339 330 L 339 384 A 80.0 10 0 0 0 499 384 L 499 330 Z" fill="#132e21" stroke="#2ecc71" stroke-width="2"/>
+  <ellipse cx="419.0" cy="330" rx="80.0" ry="10" fill="#132e21" stroke="#2ecc71" stroke-width="2"/>
+  <text x="419.0" y="358.0" text-anchor="middle" fill="#e6edf3" font-size="12.5" font-weight="700">Local Scratch SSD</text>
+  <text x="419.0" y="374.0" text-anchor="middle" fill="#e6edf3" font-size="12.5">(D:/&lt;Dataset&gt;)</text>
+  <rect x="334" y="452" width="170" height="86" rx="6" fill="#21262d" stroke="#484f58" stroke-width="1.5"/>
+  <text x="419.0" y="481.0" text-anchor="middle" fill="#e6edf3" font-size="13.5" font-weight="700">Export Data Package</text>
+  <text x="419.0" y="499.0" text-anchor="middle" fill="#c9d1d9" font-size="12.5">&lt;Pkg&gt;/images/, .xml,</text>
+  <text x="419.0" y="517.0" text-anchor="middle" fill="#c9d1d9" font-size="12.5">mipmaps &amp; action.log</text>
+  <rect x="610" y="66" width="198" height="498" rx="8" fill="#1c2128" stroke="#30363d" stroke-width="1.3"/>
+  <path d="M 610 94 L 808 94" stroke="#30363d" stroke-width="1.2"/>
+  <text x="709.0" y="85.0" text-anchor="middle" fill="#f0f6fc" font-size="12.5" font-weight="700">Control, State &amp; UI</text>
+  <rect x="620" y="104" width="178" height="54" rx="6" fill="#21262d" stroke="#484f58" stroke-width="1.5"/>
+  <text x="709.0" y="126.0" text-anchor="middle" fill="#e6edf3" font-size="13.5" font-weight="700">nas_indexer.py</text>
+  <text x="709.0" y="144.0" text-anchor="middle" fill="#c9d1d9" font-size="12.5">(--indexer auto-restart)</text>
+  <path d="M 620 220 L 620 278 A 89.0 10 0 0 0 798 278 L 798 220 Z" fill="#21262d" stroke="#484f58" stroke-width="2"/>
+  <ellipse cx="709.0" cy="220" rx="89.0" ry="10" fill="#21262d" stroke="#484f58" stroke-width="2"/>
+  <text x="709.0" y="242.0" text-anchor="middle" fill="#e6edf3" font-size="12.5" font-weight="700">%APPDATA%/BioEM_Preview/</text>
+  <text x="709.0" y="258.0" text-anchor="middle" fill="#e6edf3" font-size="12.5">cache, aligned_datasets,</text>
+  <text x="709.0" y="274.0" text-anchor="middle" fill="#e6edf3" font-size="12.5">dataset_logs/</text>
+  <rect x="620" y="340" width="178" height="78" rx="6" fill="#21262d" stroke="#484f58" stroke-width="1.5"/>
+  <text x="709.0" y="365.0" text-anchor="middle" fill="#e6edf3" font-size="13.5" font-weight="700">Preview_beta.exe</text>
+  <text x="709.0" y="383.0" text-anchor="middle" fill="#c9d1d9" font-size="12.5">Badges, Logs Drawer,</text>
+  <text x="709.0" y="401.0" text-anchor="middle" fill="#c9d1d9" font-size="12.5">Setup Wizard</text>
+  <rect x="620" y="452" width="178" height="86" rx="6" fill="#21262d" stroke="#484f58" stroke-width="1.5"/>
+  <text x="709.0" y="481.0" text-anchor="middle" fill="#e6edf3" font-size="13.5" font-weight="700">Right-Click Menu</text>
+  <text x="709.0" y="499.0" text-anchor="middle" fill="#c9d1d9" font-size="12.5">Show Folder | Align Z</text>
+  <text x="709.0" y="517.0" text-anchor="middle" fill="#c9d1d9" font-size="12.5">Export Pkg | Refresh</text>
+  <rect x="224" y="660" width="320" height="380" rx="8" fill="#161b22" stroke="#1f6feb" stroke-width="2"/>
+  <path d="M 224 694 L 544 694" stroke="#1f6feb" stroke-width="1.2"/>
+  <text x="384.0" y="682.0" text-anchor="middle" fill="#58a6ff" font-size="15" font-weight="700">2. Metadata Check &amp; Z-Stack Routing</text>
+  <rect x="240" y="712" width="288" height="76" rx="6" fill="#21262d" stroke="#484f58" stroke-width="1.5"/>
+  <text x="384.0" y="736.0" text-anchor="middle" fill="#e6edf3" font-size="13.5" font-weight="700">1st TIFF Header Check (bioem_config.py)</text>
+  <text x="384.0" y="754.0" text-anchor="middle" fill="#c9d1d9" font-size="12.5">Tag 34682 DigitalContrast:</text>
+  <text x="384.0" y="772.0" text-anchor="middle" fill="#c9d1d9" font-size="12.5">-1 = Keep LUT | +1 = Invert LUT</text>
+  <rect x="254" y="826" width="260" height="58" rx="6" fill="#21262d" stroke="#484f58" stroke-width="1.5"/>
+  <text x="384.0" y="850.0" text-anchor="middle" fill="#e6edf3" font-size="13.5" font-weight="700">fiji_trigger.txt</text>
+  <text x="384.0" y="868.0" text-anchor="middle" fill="#c9d1d9" font-size="12.5">...|z-stack|1|1|invert=0/1</text>
+  <rect x="244" y="926" width="280" height="74" rx="6" fill="#21262d" stroke="#484f58" stroke-width="1.5"/>
+  <text x="384.0" y="958.0" text-anchor="middle" fill="#e6edf3" font-size="13.5" font-weight="700">BioEM_Watcher.ijm (AutoRun)</text>
+  <text x="384.0" y="976.0" text-anchor="middle" fill="#c9d1d9" font-size="12.5">Virtual Stack + Conditional Invert LUT</text>
+  <rect x="570" y="660" width="400" height="150" rx="8" fill="#161b22" stroke="#a371f7" stroke-width="2"/>
+  <path d="M 570 694 L 970 694" stroke="#a371f7" stroke-width="1.2"/>
+  <text x="770.0" y="682.0" text-anchor="middle" fill="#d2a8ff" font-size="15" font-weight="700">3A. PyTorch Runtime (bioem_engine.py)</text>
+  <rect x="626" y="707" width="288" height="86" rx="6" fill="#21262d" stroke="#484f58" stroke-width="1.5"/>
+  <text x="770.0" y="736.0" text-anchor="middle" fill="#e6edf3" font-size="13.5" font-weight="700">On-Demand uv Bootstrapper</text>
+  <text x="770.0" y="754.0" text-anchor="middle" fill="#c9d1d9" font-size="12.5">Installs isolated CUDA / CPU PyTorch venv:</text>
+  <text x="770.0" y="772.0" text-anchor="middle" fill="#c9d1d9" font-size="12.5">%LOCALAPPDATA%/BioEM_Preview/runtime/</text>
+  <rect x="570" y="865" width="400" height="560" rx="8" fill="#161b22" stroke="#484f58" stroke-width="1.6"/>
+  <path d="M 570 899 L 970 899" stroke="#484f58" stroke-width="1.2"/>
+  <text x="770.0" y="887.0" text-anchor="middle" fill="#f0f6fc" font-size="15" font-weight="700">3B. PyTorch GPU/CPU Alignment Engine</text>
+  <rect x="590" y="913" width="360" height="62" rx="6" fill="#21262d" stroke="#484f58" stroke-width="1.5"/>
+  <text x="770.0" y="939.0" text-anchor="middle" fill="#e6edf3" font-size="13.5" font-weight="700">bioem_torch_align.py</text>
+  <text x="770.0" y="957.0" text-anchor="middle" fill="#c9d1d9" font-size="12.5">Inspect 1st TIFF DigitalContrast &amp; grid (RxC, z=N)</text>
+  <rect x="590" y="1003" width="360" height="68" rx="6" fill="#21262d" stroke="#484f58" stroke-width="1.5"/>
+  <text x="770.0" y="1032.0" text-anchor="middle" fill="#e6edf3" font-size="13.5" font-weight="700">Pass 1: 2D Intra-Section Montaging</text>
+  <text x="770.0" y="1050.0" text-anchor="middle" fill="#c9d1d9" font-size="12.5">Coarse-to-fine FFT phase corr (-dx, -dy) + IRLS/LSQR</text>
+  <rect x="590" y="1099" width="360" height="72" rx="6" fill="#21262d" stroke="#484f58" stroke-width="1.5"/>
+  <text x="770.0" y="1130.0" text-anchor="middle" fill="#e6edf3" font-size="13.5" font-weight="700">Pass 2: Layer-as-Rigid-Unit Z-Align</text>
+  <text x="770.0" y="1148.0" text-anchor="middle" fill="#c9d1d9" font-size="12.5">Procrustes RANSAC (align_z_pair_rigid, cumulative fit)</text>
+  <rect x="590" y="1201" width="360" height="78" rx="6" fill="#21262d" stroke="#484f58" stroke-width="1.5"/>
+  <text x="770.0" y="1235.0" text-anchor="middle" fill="#e6edf3" font-size="13.5" font-weight="700">Pass 3: Native TrakEM2 XML &amp; Logs</text>
+  <text x="770.0" y="1253.0" text-anchor="middle" fill="#c9d1d9" font-size="12.5">filter_enabled/invert, int filter_min/max + dataset_logs/</text>
+  <rect x="615" y="1321" width="310" height="68" rx="6" fill="#21262d" stroke="#484f58" stroke-width="1.5"/>
+  <text x="770.0" y="1350.0" text-anchor="middle" fill="#e6edf3" font-size="13.5" font-weight="700">Fiji (Java 8) / TrakEM2</text>
+  <text x="770.0" y="1368.0" text-anchor="middle" fill="#c9d1d9" font-size="12.5">Direct Display, Mipmaps &amp; Inspection</text>
+  <rect x="20" y="1460" width="1190" height="250" rx="8" fill="#161b22" stroke="#484f58" stroke-width="1.6"/>
+  <path d="M 20 1494 L 1210 1494" stroke="#484f58" stroke-width="1.2"/>
+  <text x="615.0" y="1482.0" text-anchor="middle" fill="#f0f6fc" font-size="15" font-weight="700">4. Supported Workflows &amp; Contextual Outputs</text>
+  <rect x="45" y="1550" width="270" height="140" rx="6" fill="#1e3a2f" stroke="#2ecc71" stroke-width="2"/>
+  <text x="180.0" y="1588.0" text-anchor="middle" fill="#e8f5e9" font-size="13.5" font-weight="700">Workflow 1: Z-Stack</text>
+  <text x="180.0" y="1606.0" text-anchor="middle" fill="#e8f5e9" font-size="12.5">(Single tile, serial sections)</text>
+  <text x="180.0" y="1642.0" text-anchor="middle" fill="#e8f5e9" font-size="12.5">Default: Virtual Stack (auto Invert LUT)</text>
+  <text x="180.0" y="1660.0" text-anchor="middle" fill="#e8f5e9" font-size="12.5">Right-Click: Align &amp; Display (Pass 2 + 3)</text>
+  <rect x="334" y="1550" width="270" height="140" rx="6" fill="#3b2912" stroke="#e67e22" stroke-width="2"/>
+  <text x="469.0" y="1588.0" text-anchor="middle" fill="#fef5e7" font-size="13.5" font-weight="700">Workflow 2: 2D Mosaic</text>
+  <text x="469.0" y="1606.0" text-anchor="middle" fill="#fef5e7" font-size="12.5">(Multiple tiles, single layer)</text>
+  <text x="469.0" y="1642.0" text-anchor="middle" fill="#fef5e7" font-size="12.5">Action: Pass 1 (2D Montage) + Pass 3</text>
+  <text x="469.0" y="1660.0" text-anchor="middle" fill="#fef5e7" font-size="12.5">TrakEM2 .xml + Fiji + Export</text>
+  <rect x="623" y="1550" width="270" height="140" rx="6" fill="#3e1b18" stroke="#e74c3c" stroke-width="2"/>
+  <text x="758.0" y="1588.0" text-anchor="middle" fill="#fdedec" font-size="13.5" font-weight="700">Workflow 3: Mosaic Z-Stack</text>
+  <text x="758.0" y="1606.0" text-anchor="middle" fill="#fdedec" font-size="12.5">(Multiple tiles, serial sections)</text>
+  <text x="758.0" y="1642.0" text-anchor="middle" fill="#fdedec" font-size="12.5">Action: Pass 1 (2D) + Pass 2 (Z) + Pass 3</text>
+  <text x="758.0" y="1660.0" text-anchor="middle" fill="#fdedec" font-size="12.5">TrakEM2 .xml + Fiji + Export</text>
+  <rect x="910" y="1550" width="275" height="140" rx="6" fill="#182b3a" stroke="#58a6ff" stroke-width="2"/>
+  <text x="1047.5" y="1588.0" text-anchor="middle" fill="#eef6ff" font-size="13.5" font-weight="700">Contextual Package Export</text>
+  <text x="1047.5" y="1606.0" text-anchor="middle" fill="#eef6ff" font-size="12.5">(Synced + Aligned + Saved .xml)</text>
+  <text x="1047.5" y="1642.0" text-anchor="middle" fill="#eef6ff" font-size="12.5">Copies images/, mipmaps &amp; logs</text>
+  <text x="1047.5" y="1660.0" text-anchor="middle" fill="#eef6ff" font-size="12.5">Rewrites portable relative .xml</text>
+  <path d="M 419 158 L 419 198" fill="none" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M 419 270 L 419 318" fill="none" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="375.0" y="283" width="88.0" height="18" rx="4" fill="#0d1117" stroke="#30363d" stroke-width="0.8"/>
+  <text x="419" y="296" text-anchor="middle" fill="#f0f6fc" font-size="12" font-weight="700">Delta Sync</text>
+  <path d="M 419 394 L 419 450" fill="none" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="371.4" y="411" width="95.2" height="18" rx="4" fill="#0d1117" stroke="#30363d" stroke-width="0.8"/>
+  <text x="419" y="424" text-anchor="middle" fill="#f0f6fc" font-size="12" font-weight="700">Export Copy</text>
+  <path d="M 620 131 L 558 131 L 558 235 L 501 235" fill="none" stroke="#58a6ff" stroke-width="2" stroke-dasharray="6,4" marker-end="url(#arrow)"/>
+  <rect x="532.0" y="171" width="52.0" height="18" rx="4" fill="#0d1117" stroke="#30363d" stroke-width="0.8"/>
+  <text x="558" y="184" text-anchor="middle" fill="#f0f6fc" font-size="12" font-weight="700">Scans</text>
+  <path d="M 709 158 L 709 208" fill="none" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="657.8" y="173" width="102.4" height="18" rx="4" fill="#0d1117" stroke="#30363d" stroke-width="0.8"/>
+  <text x="709" y="186" text-anchor="middle" fill="#f0f6fc" font-size="12" font-weight="700">Update Index</text>
+  <path d="M 709 288 L 709 338" fill="none" stroke="#58a6ff" stroke-width="2" stroke-dasharray="6,4" marker-end="url(#arrow)"/>
+  <rect x="686.6" y="302" width="44.8" height="18" rx="4" fill="#0d1117" stroke="#30363d" stroke-width="0.8"/>
+  <text x="709" y="315" text-anchor="middle" fill="#f0f6fc" font-size="12" font-weight="700">Poll</text>
+  <path d="M 620 379 L 558 379 L 558 357 L 501 357" fill="none" stroke="#58a6ff" stroke-width="2" stroke-dasharray="6,4" marker-end="url(#arrow)"/>
+  <rect x="535.6" y="357" width="44.8" height="18" rx="4" fill="#0d1117" stroke="#30363d" stroke-width="0.8"/>
+  <text x="558" y="370" text-anchor="middle" fill="#f0f6fc" font-size="12" font-weight="700">Sync</text>
+  <path d="M 620 495 L 506 495" fill="none" stroke="#58a6ff" stroke-width="2" stroke-dasharray="6,4" marker-end="url(#arrow)"/>
+  <rect x="511.8" y="484" width="102.4" height="18" rx="4" fill="#0d1117" stroke="#30363d" stroke-width="0.8"/>
+  <text x="563" y="497" text-anchor="middle" fill="#f0f6fc" font-size="12" font-weight="700">Rewrite .xml</text>
+  <path d="M 798 360 L 885 360 L 885 614 L 770 614 L 770 658" fill="none" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="859.0" y="469" width="52.0" height="18" rx="4" fill="#0d1117" stroke="#30363d" stroke-width="0.8"/>
+  <text x="885" y="482" text-anchor="middle" fill="#f0f6fc" font-size="12" font-weight="700">Align</text>
+  <path d="M 798 385 L 862 385 L 862 598 L 384 598 L 384 658" fill="none" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="566.8" y="587" width="66.4" height="18" rx="4" fill="#0d1117" stroke="#30363d" stroke-width="0.8"/>
+  <text x="600" y="600" text-anchor="middle" fill="#f0f6fc" font-size="12" font-weight="700">Z-Stack</text>
+  <path d="M 384 788 L 384 824" fill="none" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="347.2" y="795" width="73.6" height="18" rx="4" fill="#0d1117" stroke="#30363d" stroke-width="0.8"/>
+  <text x="384" y="808" text-anchor="middle" fill="#f0f6fc" font-size="12" font-weight="700">1st .tif</text>
+  <path d="M 384 884 L 384 924" fill="none" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="332.8" y="893" width="102.4" height="18" rx="4" fill="#0d1117" stroke="#30363d" stroke-width="0.8"/>
+  <text x="384" y="906" text-anchor="middle" fill="#f0f6fc" font-size="12" font-weight="700">AutoRun Poll</text>
+  <path d="M 770 793 L 770 863" fill="none" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="726.0" y="821" width="88.0" height="18" rx="4" fill="#0d1117" stroke="#30363d" stroke-width="0.8"/>
+  <text x="770" y="834" text-anchor="middle" fill="#f0f6fc" font-size="12" font-weight="700">Subprocess</text>
+  <path d="M 770 975 L 770 1001" fill="none" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M 770 1071 L 770 1097" fill="none" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M 770 1171 L 770 1199" fill="none" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M 770 1279 L 770 1319" fill="none" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="729.6" y="1288" width="80.8" height="18" rx="4" fill="#0d1117" stroke="#30363d" stroke-width="0.8"/>
+  <text x="770" y="1301" text-anchor="middle" fill="#f0f6fc" font-size="12" font-weight="700">Open .xml</text>
+  <path d="M 384 1040 L 384 1435 L 180 1435 L 180 1548" fill="none" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="89.2" y="1511" width="181.6" height="18" rx="4" fill="#0d1117" stroke="#30363d" stroke-width="0.8"/>
+  <text x="180" y="1524" text-anchor="middle" fill="#f0f6fc" font-size="12" font-weight="700">Virtual Stack (Z-Stack)</text>
+  <path d="M 615 1355 L 415 1355 L 415 1548" fill="none" stroke="#58a6ff" stroke-width="2" stroke-dasharray="6,4" marker-end="url(#arrow)"/>
+  <rect x="299.0" y="1511" width="232.0" height="18" rx="4" fill="#0d1117" stroke="#30363d" stroke-width="0.8"/>
+  <text x="415" y="1524" text-anchor="middle" fill="#f0f6fc" font-size="12" font-weight="700">2D Spatial Mosaic (Pass 1 + 3)</text>
+  <path d="M 770 1389 L 770 1412 L 820 1412 L 820 1548" fill="none" stroke="#58a6ff" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="700.4" y="1511" width="239.2" height="18" rx="4" fill="#0d1117" stroke="#30363d" stroke-width="0.8"/>
+  <text x="820" y="1524" text-anchor="middle" fill="#f0f6fc" font-size="12" font-weight="700">Mosaic Z-Stack (Pass 1 + 2 + 3)</text>
+  <path d="M 925 1355 L 1047.5 1355 L 1047.5 1548" fill="none" stroke="#58a6ff" stroke-width="2" stroke-dasharray="6,4" marker-end="url(#arrow)"/>
+  <rect x="981.9" y="1511" width="131.2" height="18" rx="4" fill="#0d1117" stroke="#30363d" stroke-width="0.8"/>
+  <text x="1047.5" y="1524" text-anchor="middle" fill="#f0f6fc" font-size="12" font-weight="700">Saved .xml + Log</text>
 </svg>
