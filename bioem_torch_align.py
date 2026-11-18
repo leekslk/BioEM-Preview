@@ -392,8 +392,8 @@ def write_trakem2_xml(xml_path, layer_records, tile_w, tile_h, is_16bit):
     if not math.isfinite(min_x):
         min_x, min_y, max_x, max_y = 0.0, 0.0, float(tile_w), float(tile_h)
 
-    layer_w = int(math.ceil(max_x - min_x))
-    layer_h = int(math.ceil(max_y - min_y))
+    layer_w = max(1, int(math.ceil(max_x - min_x)))
+    layer_h = max(1, int(math.ceil(max_y - min_y)))
     patch_type = "1" if is_16bit else "0"
     max_val = "65535.0" if is_16bit else "255.0"
 
@@ -408,50 +408,159 @@ def write_trakem2_xml(xml_path, layer_records, tile_w, tile_h, is_16bit):
         f.write('\t<!ATTLIST project id NMTOKEN #REQUIRED>\n')
         f.write('\t<!ATTLIST project unuid NMTOKEN #REQUIRED>\n')
         f.write('\t<!ATTLIST project title NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST project preprocessor NMTOKEN #REQUIRED>\n')
         f.write('\t<!ATTLIST project mipmaps_folder NMTOKEN #REQUIRED>\n')
         f.write('\t<!ATTLIST project storage_folder NMTOKEN #REQUIRED>\n')
         f.write('\t<!ATTLIST project mipmaps_format NMTOKEN #REQUIRED>\n')
         f.write('\t<!ATTLIST project image_resizing_mode NMTOKEN #REQUIRED>\n')
-        f.write('\t<!ELEMENT t2_layer_set (t2_calibration,t2_layer*)>\n')
-        f.write('\t<!ATTLIST t2_layer_set id NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST project first_mipmap_level_saved NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ELEMENT anything EMPTY>\n')
+        f.write('\t<!ATTLIST anything id NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST anything expanded NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ELEMENT t2_prop EMPTY>\n')
+        f.write('\t<!ATTLIST t2_prop key NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_prop value NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ELEMENT t2_linked_prop EMPTY>\n')
+        f.write('\t<!ATTLIST t2_linked_prop target_id NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_linked_prop key NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_linked_prop value NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ELEMENT t2_annot EMPTY>\n')
+        f.write('\t<!ELEMENT t2_layer (t2_patch,t2_label,t2_layer_set,t2_profile)>\n')
+        f.write('\t<!ATTLIST t2_layer oid NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_layer thickness NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_layer z NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ELEMENT t2_layer_set (t2_prop,t2_linked_prop,t2_annot,t2_layer,t2_pipe,t2_ball,t2_area_list,t2_calibration,t2_stack,t2_treeline)>\n')
+        f.write('\t<!ATTLIST t2_layer_set oid NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_layer_set layer_id NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_layer_set transform NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_layer_set style NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_layer_set locked NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_layer_set visible NMTOKEN #REQUIRED>\n')
         f.write('\t<!ATTLIST t2_layer_set title NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_layer_set links NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_layer_set composite NMTOKEN #REQUIRED>\n')
         f.write('\t<!ATTLIST t2_layer_set layer_width NMTOKEN #REQUIRED>\n')
         f.write('\t<!ATTLIST t2_layer_set layer_height NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_layer_set rot_x NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_layer_set rot_y NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_layer_set rot_z NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_layer_set snapshots_quality NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_layer_set color_cues NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_layer_set area_color_cues NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_layer_set avoid_color_cue_colors NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_layer_set n_layers_color_cue NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_layer_set paint_arrows NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_layer_set paint_tags NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_layer_set paint_edge_confidence_boxes NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_layer_set preload_ahead NMTOKEN #REQUIRED>\n')
         f.write('\t<!ELEMENT t2_calibration EMPTY>\n')
         f.write('\t<!ATTLIST t2_calibration pixelWidth NMTOKEN #REQUIRED>\n')
         f.write('\t<!ATTLIST t2_calibration pixelHeight NMTOKEN #REQUIRED>\n')
         f.write('\t<!ATTLIST t2_calibration pixelDepth NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_calibration xOrigin NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_calibration yOrigin NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_calibration zOrigin NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_calibration info NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_calibration valueUnit NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_calibration timeUnit NMTOKEN #REQUIRED>\n')
         f.write('\t<!ATTLIST t2_calibration unit NMTOKEN #REQUIRED>\n')
-        f.write('\t<!ELEMENT t2_layer (t2_patch*)>\n')
-        f.write('\t<!ATTLIST t2_layer id NMTOKEN #REQUIRED>\n')
-        f.write('\t<!ATTLIST t2_layer title NMTOKEN #REQUIRED>\n')
-        f.write('\t<!ATTLIST t2_layer z NMTOKEN #REQUIRED>\n')
-        f.write('\t<!ATTLIST t2_layer thickness NMTOKEN #REQUIRED>\n')
-        f.write('\t<!ELEMENT t2_patch EMPTY>\n')
+        f.write('\t<!ELEMENT t2_filter EMPTY>\n')
+        f.write('\t<!ELEMENT t2_patch (t2_prop,t2_linked_prop,t2_annot,ict_transform,ict_transform_list,t2_filter)>\n')
         f.write('\t<!ATTLIST t2_patch oid NMTOKEN #REQUIRED>\n')
-        f.write('\t<!ATTLIST t2_patch width NMTOKEN #REQUIRED>\n')
-        f.write('\t<!ATTLIST t2_patch height NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_patch layer_id NMTOKEN #REQUIRED>\n')
         f.write('\t<!ATTLIST t2_patch transform NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_patch style NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_patch locked NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_patch visible NMTOKEN #REQUIRED>\n')
         f.write('\t<!ATTLIST t2_patch title NMTOKEN #REQUIRED>\n')
-        f.write('\t<!ATTLIST t2_patch type NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_patch links NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_patch composite NMTOKEN #REQUIRED>\n')
         f.write('\t<!ATTLIST t2_patch file_path NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_patch original_path NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_patch type NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_patch false_color NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_patch ct NMTOKEN #REQUIRED>\n')
         f.write('\t<!ATTLIST t2_patch o_width NMTOKEN #REQUIRED>\n')
         f.write('\t<!ATTLIST t2_patch o_height NMTOKEN #REQUIRED>\n')
         f.write('\t<!ATTLIST t2_patch min NMTOKEN #REQUIRED>\n')
         f.write('\t<!ATTLIST t2_patch max NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_patch pps NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_patch mres NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_patch ct_id NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_patch alpha_mask_id NMTOKEN #REQUIRED>\n')
         f.write('\t<!ELEMENT t2_display EMPTY>\n')
         f.write('\t<!ATTLIST t2_display id NMTOKEN #REQUIRED>\n')
         f.write('\t<!ATTLIST t2_display layer_id NMTOKEN #REQUIRED>\n')
-        f.write(']>\n\n')
+        f.write('\t<!ATTLIST t2_display x NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_display y NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_display magnification NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_display srcrect_x NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_display srcrect_y NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_display srcrect_width NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_display srcrect_height NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_display scroll_step NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_display c_alphas NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_display c_alphas_state NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_display filter_enabled NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_display filter_min_max_enabled NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_display filter_min NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_display filter_max NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_display filter_invert NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_display filter_clahe_enabled NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_display filter_clahe_block_size NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_display filter_clahe_histogram_bins NMTOKEN #REQUIRED>\n')
+        f.write('\t<!ATTLIST t2_display filter_clahe_max_slope NMTOKEN #REQUIRED>\n')
+        f.write('] >\n\n')
 
         f.write('<trakem2>\n')
-        f.write('\t<project id="0" unuid="%s" title="%s" mipmaps_folder="%s" storage_folder="" mipmaps_format="4" image_resizing_mode="AreaDownsampling">\n' % (
-            unuid, xml_escape(proj_title, {'"': '&quot;'}), xml_escape(mipmaps_rel, {'"': '&quot;'})))
+        f.write('\t<project\n')
+        f.write('\t\tid="0"\n')
+        f.write('\t\ttitle="%s"\n' % xml_escape(proj_title, {'"': '&quot;'}))
+        f.write('\t\tunuid="%s"\n' % unuid)
+        f.write('\t\tmipmaps_folder="%s"\n' % xml_escape(mipmaps_rel, {'"': '&quot;'}))
+        f.write('\t\tstorage_folder="./"\n')
+        f.write('\t\tmipmaps_format="4"\n')
+        f.write('\t\timage_resizing_mode="AreaDownsampling"\n')
+        f.write('\t\tfirst_mipmap_level_saved="0"\n')
+        f.write('\t>\n')
         f.write('\t</project>\n')
 
-        f.write('\t<t2_layer_set id="1" title="Top level" links="" layer_width="%d" layer_height="%d" rot_x="0.0" rot_y="0.0" rot_z="0.0" snapshots_quality="true" snapshots_mode="Full" color_cues="true" area_color_cues="true" avoid_color_cue_colors="false" n_layers_color_cue="0" paint_arrows="true" paint_tags="true" paint_edge_confidence_boxes="true" preloader_threads="8" preload_ahead="1">\n' % (
-            layer_w, layer_h))
-        f.write('\t\t<t2_calibration pixelWidth="1.0" pixelHeight="1.0" pixelDepth="1.0" xOrigin="0.0" yOrigin="0.0" zOrigin="0.0" info="" valueUnit="Gray Value" timeUnit="sec" unit="pixel" />\n')
+        f.write('\t<t2_layer_set\n')
+        f.write('\t\toid="1"\n')
+        f.write('\t\twidth="%.1f"\n' % float(layer_w))
+        f.write('\t\theight="%.1f"\n' % float(layer_h))
+        f.write('\t\ttransform="matrix(1.0,0.0,0.0,1.0,0.0,0.0)"\n')
+        f.write('\t\ttitle="Top level"\n')
+        f.write('\t\tlinks=""\n')
+        f.write('\t\tlayer_width="%.1f"\n' % float(layer_w))
+        f.write('\t\tlayer_height="%.1f"\n' % float(layer_h))
+        f.write('\t\trot_x="0.0"\n')
+        f.write('\t\trot_y="0.0"\n')
+        f.write('\t\trot_z="0.0"\n')
+        f.write('\t\tsnapshots_quality="true"\n')
+        f.write('\t\tsnapshots_mode="Full"\n')
+        f.write('\t\tcolor_cues="true"\n')
+        f.write('\t\tarea_color_cues="true"\n')
+        f.write('\t\tavoid_color_cue_colors="false"\n')
+        f.write('\t\tn_layers_color_cue="0"\n')
+        f.write('\t\tpaint_arrows="true"\n')
+        f.write('\t\tpaint_tags="true"\n')
+        f.write('\t\tpaint_edge_confidence_boxes="true"\n')
+        f.write('\t\tprepaint="false"\n')
+        f.write('\t\tpreload_ahead="1"\n')
+        f.write('\t>\n')
+        f.write('\t\t<t2_calibration\n')
+        f.write('\t\t\tpixelWidth="1.0"\n')
+        f.write('\t\t\tpixelHeight="1.0"\n')
+        f.write('\t\t\tpixelDepth="1.0"\n')
+        f.write('\t\t\txOrigin="0.0"\n')
+        f.write('\t\t\tyOrigin="0.0"\n')
+        f.write('\t\t\tzOrigin="0.0"\n')
+        f.write('\t\t\tinfo=""\n')
+        f.write('\t\t\tvalueUnit="Gray Value"\n')
+        f.write('\t\t\ttimeUnit="sec"\n')
+        f.write('\t\t\tunit="pixel"\n')
+        f.write('\t\t/>\n')
 
         for idx, rec in enumerate(layer_records):
             layer_id = oid_counter
@@ -459,8 +568,8 @@ def write_trakem2_xml(xml_path, layer_records, tile_w, tile_h, is_16bit):
             if idx == 0:
                 first_layer_id = layer_id
 
-            f.write('\t\t<t2_layer id="%d" title="z_%06d" links="" z="%.1f" thickness="1.0" visibility="true">\n' % (
-                layer_id, rec["z_orig"], float(idx)))
+            f.write('\t\t<t2_layer oid="%d" thickness="1.0" z="%.1f" title="z_%06d">\n' % (
+                layer_id, float(idx), rec["z_orig"]))
 
             for p in rec["patches"]:
                 patch_id = oid_counter
@@ -472,16 +581,30 @@ def write_trakem2_xml(xml_path, layer_records, tile_w, tile_h, is_16bit):
                     m00, m10, m01, m11, tx_norm, ty_norm)
                 fname = os.path.basename(p["path"])
 
-                f.write('\t\t\t<t2_patch oid="%d" width="%.1f" height="%.1f" transform="%s" title="%s" links="" type="%s" file_path="%s" style="fill-opacity:1.0;stroke:#ffff00;" o_width="%d" o_height="%d" min="0.0" max="%s" mres="32" ct_id="-1" alpha_mask_id="-1" />\n' % (
-                    patch_id, float(tile_w), float(tile_h), mat_str,
-                    xml_escape(fname, {'"': '&quot;'}),
-                    patch_type, xml_escape(p["path"], {'"': '&quot;'}), tile_w, tile_h, max_val))
+                f.write(
+                    '\t\t\t<t2_patch oid="%d" width="%.1f" height="%.1f" transform="%s" '
+                    'title="%s" links="" type="%s" file_path="%s" style="fill-opacity:1.0;stroke:#ffff00;" '
+                    'o_width="%d" o_height="%d" min="0.0" max="%s" mres="32" ct_id="0" alpha_mask_id="0" />\n' % (
+                        patch_id, float(tile_w), float(tile_h), mat_str,
+                        xml_escape(fname, {'"': '&quot;'}),
+                        patch_type, xml_escape(p["path"], {'"': '&quot;'}),
+                        tile_w, tile_h, max_val
+                    )
+                )
 
             f.write('\t\t</t2_layer>\n')
 
         f.write('\t</t2_layer_set>\n')
-        f.write('\t<t2_display id="%d" layer_id="%d" c_alphas="-1" c_alphas_state="-1" x="0" y="0" magnification="0.15" srcrect_x="0" srcrect_y="0" srcrect_width="%d" srcrect_height="%d" />\n' % (
-            oid_counter, first_layer_id, layer_w, layer_h))
+        f.write(
+            '\t<t2_display id="%d" layer_id="%d" c_alphas="-1" c_alphas_state="-1" '
+            'x="0" y="0" magnification="0.15" srcrect_x="0" srcrect_y="0" '
+            'srcrect_width="%d" srcrect_height="%d" scroll_step="1" '
+            'filter_enabled="false" filter_min_max_enabled="false" filter_min="0.0" filter_max="255.0" '
+            'filter_invert="false" filter_clahe_enabled="false" filter_clahe_block_size="127" '
+            'filter_clahe_histogram_bins="256" filter_clahe_max_slope="3.0" />\n' % (
+                oid_counter, first_layer_id, layer_w, layer_h
+            )
+        )
         f.write('</trakem2>\n')
 
 
