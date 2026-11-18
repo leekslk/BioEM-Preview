@@ -94,7 +94,7 @@ https://github.com/user-attachments/assets/d79dca7f-c68c-4e12-be86-e9ebd16b52c7
 #### 3. Mosaic Z-Stack Alignment & Extended Logs Sidebar
 Click a `Mosaic Z` dataset to run 2D stitching (Pass 1) and sequential Z-alignment (Pass 2) while expanding the right-hand **Logs** panel to monitor per-pass elapsed/remaining times and LUT detection.
 
-> _Demo slot (`docs/media/demo_3_mosaic_z_logs.gif` or drag-and-drop `.mp4` in GitHub editor)_
+https://github.com/user-attachments/assets/1d0c0cb1-a22a-404d-a16f-fb01e48e392c
 
 #### 4. Export Portable Data Package
 Right-click a synchronized and aligned dataset (e.g., an aligned `Z-Stack` or `Mosaic Z-Stack`), select **📦 Export Data Package**, choose a target directory, and inspect the generated self-contained folder (`<DatasetName>.xml`, `images/`, `trakem2.*` mipmaps, and saved alignment log).
