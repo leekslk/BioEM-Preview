@@ -99,8 +99,24 @@ def detect_compute_devices():
 # ==============================================================================
 # (2) PyTorch Bandpass FFT Phase Correlation Engine
 # ==============================================================================
+def _tukey_window_1d(length, alpha, device):
+    """Flat-top Tukey window (alpha=0 -> rectangular, alpha=1 -> Hann)."""
+    if alpha <= 0.0 or length <= 2:
+        return torch.ones(length, device=device, dtype=torch.float32)
+    if alpha >= 1.0:
+        return torch.hann_window(length, periodic=False, device=device, dtype=torch.float32)
+    x = torch.linspace(0.0, 1.0, length, device=device, dtype=torch.float32)
+    w = torch.ones(length, device=device, dtype=torch.float32)
+    half_alpha = 0.5 * alpha
+    left = x < half_alpha
+    right = x > (1.0 - half_alpha)
+    w[left] = 0.5 * (1.0 + torch.cos(math.pi * (x[left] / half_alpha - 1.0)))
+    w[right] = 0.5 * (1.0 + torch.cos(math.pi * ((x[right] - 1.0) / half_alpha + 1.0)))
+    return w
+
+
 @torch.inference_mode()
-def _torch_phase_correlate(strip_a_cpu, strip_b_cpu, device, downsample=1):
+def _torch_phase_correlate(strip_a_cpu, strip_b_cpu, device, downsample=1, linear_pad=False, tukey_alpha=0.20):
     a_np = np.ascontiguousarray(strip_a_cpu, dtype=np.float32)
     b_np = np.ascontiguousarray(strip_b_cpu, dtype=np.float32)
 
@@ -116,66 +132,274 @@ def _torch_phase_correlate(strip_a_cpu, strip_b_cpu, device, downsample=1):
     a = torch.from_numpy(a_np[:h, :w]).to(device=device, non_blocking=True)
     b = torch.from_numpy(b_np[:h, :w]).to(device=device, non_blocking=True)
 
-    a = a - torch.mean(a)
-    b = b - torch.mean(b)
-    if float(torch.std(a).item()) < 1e-5 or float(torch.std(b).item()) < 1e-5:
+    std_a = float(torch.std(a).item())
+    std_b = float(torch.std(b).item())
+    if std_a < 1e-4 or std_b < 1e-4:
         return 0.0, 0.0, 0.0
 
-    wy = torch.hann_window(h, periodic=False, device=device, dtype=torch.float32)[:, None]
-    wx = torch.hann_window(w, periodic=False, device=device, dtype=torch.float32)[None, :]
+    a = (a - torch.mean(a)) / std_a
+    b = (b - torch.mean(b)) / std_b
+
+    wy = _tukey_window_1d(h, tukey_alpha, device)[:, None]
+    wx = _tukey_window_1d(w, tukey_alpha, device)[None, :]
     win = wy * wx
+    a = a * win
+    b = b * win
 
-    fa = torch.fft.rfft2(a * win)
-    fb = torch.fft.rfft2(b * win)
+    fft_h = (2 * h) if linear_pad else h
+    fft_w = (2 * w) if linear_pad else w
 
-    fy = torch.fft.fftfreq(h, device=device, dtype=torch.float32)[:, None]
-    fx = torch.fft.rfftfreq(w, device=device, dtype=torch.float32)[None, :]
+    fa = torch.fft.rfft2(a, s=(fft_h, fft_w))
+    fb = torch.fft.rfft2(b, s=(fft_h, fft_w))
+
+    fy = torch.fft.fftfreq(fft_h, device=device, dtype=torch.float32)[:, None]
+    fx = torch.fft.rfftfreq(fft_w, device=device, dtype=torch.float32)[None, :]
     freq_r = torch.sqrt(fy * fy + fx * fx)
-    bandpass = torch.exp(-((freq_r - 0.12) ** 2) / (2.0 * (0.14 ** 2)))
+    # Suppress DC / slow illumination ramps and high-frequency Nyquist shot noise
+    highpass = 1.0 - torch.exp(-((freq_r / 0.015) ** 2))
+    lowpass = torch.exp(-((freq_r / 0.35) ** 2))
+    bandpass = highpass * lowpass
     bandpass[0, 0] = 0.0
 
     cross = fa * torch.conj(fb)
     cps = (cross / (torch.abs(cross) + 1e-8)) * bandpass
-    corr = torch.fft.irfft2(cps, s=(h, w))
+    corr = torch.fft.irfft2(cps, s=(fft_h, fft_w))
 
-    flat_idx = int(torch.argmax(corr).item())
-    py, px = divmod(flat_idx, w)
+    if linear_pad:
+        # Restrict valid shifts in linear mode to at most 80% of strip size so edge overlap stays meaningful
+        max_sy = max(4, int(h * 0.80))
+        max_sx = max(4, int(w * 0.80))
+        sy_grid = torch.arange(fft_h, device=device)
+        sx_grid = torch.arange(fft_w, device=device)
+        sy_signed = torch.where(sy_grid >= fft_h // 2, sy_grid - fft_h, sy_grid)
+        sx_signed = torch.where(sx_grid >= fft_w // 2, sx_grid - fft_w, sx_grid)
+        valid_mask = (torch.abs(sy_signed)[:, None] <= max_sy) & (torch.abs(sx_signed)[None, :] <= max_sx)
+        corr_masked = corr.masked_fill(~valid_mask, float("-inf"))
+        flat_idx = int(torch.argmax(corr_masked).item())
+    else:
+        flat_idx = int(torch.argmax(corr).item())
+
+    py, px = divmod(flat_idx, fft_w)
     peak_val = float(corr[py, px].item())
 
-    yy = (torch.arange(h, device=device)[:, None] - py + h // 2) % h - h // 2
-    xx = (torch.arange(w, device=device)[None, :] - px + w // 2) % w - w // 2
-    bg_vals = corr[(torch.abs(yy) > 5) | (torch.abs(xx) > 5)]
-    bg_mean = float(torch.mean(bg_vals).item())
-    bg_std = float(torch.std(bg_vals).item()) + 1e-8
+    yy = (torch.arange(fft_h, device=device)[:, None] - py + fft_h // 2) % fft_h - fft_h // 2
+    xx = (torch.arange(fft_w, device=device)[None, :] - px + fft_w // 2) % fft_w - fft_w // 2
+    bg_region = corr[(torch.abs(yy) > 5) | (torch.abs(xx) > 5)]
+    if linear_pad:
+        bg_region = bg_region[bg_region != 0.0]
+        if bg_region.numel() < 16:
+            bg_region = corr
+    bg_mean = float(torch.mean(bg_region).item())
+    bg_std = float(torch.std(bg_region).item()) + 1e-8
     snr = (peak_val - bg_mean) / bg_std
 
-    c_ym = float(corr[(py - 1) % h, px].item())
-    c_yp = float(corr[(py + 1) % h, px].item())
-    c_xm = float(corr[py, (px - 1) % w].item())
-    c_xp = float(corr[py, (px + 1) % w].item())
+    c_ym = float(corr[(py - 1) % fft_h, px].item())
+    c_yp = float(corr[(py + 1) % fft_h, px].item())
+    c_xm = float(corr[py, (px - 1) % fft_w].item())
+    c_xp = float(corr[py, (px + 1) % fft_w].item())
 
     denom_y = 2.0 * (c_ym - 2.0 * peak_val + c_yp)
     denom_x = 2.0 * (c_xm - 2.0 * peak_val + c_xp)
     sub_y = max(-0.5, min(0.5, (c_ym - c_yp) / denom_y)) if abs(denom_y) > 1e-8 else 0.0
     sub_x = max(-0.5, min(0.5, (c_xm - c_xp) / denom_x)) if abs(denom_x) > 1e-8 else 0.0
 
-    shift_y = (py - h if py >= h // 2 else py) + sub_y
-    shift_x = (px - w if px >= w // 2 else px) + sub_x
+    shift_y = (py - fft_h if py >= fft_h // 2 else py) + sub_y
+    shift_x = (px - fft_w if px >= fft_w // 2 else px) + sub_x
     return float(shift_x * downsample), float(shift_y * downsample), snr
 
 
 # 
-# (3) Pass 1: Intra-Layer 2D Montaging
+# (3) Pass 1: Intra-Layer 2D Montaging (Auto-Overlap + Multi-Block 1x + IRLS)
 # 
-def solve_2d_layer(layer_tiles, tile_w, tile_h, overlap_frac, devices, min_snr=6.0):
+def _match_pair_coarse_to_fine(img_a, img_b, tile_w, tile_h, nom_dx, nom_dy, max_drift_px, dev, min_snr=5.5):
+    """
+    Two-stage registration for an adjacent tile pair (A -> B):
+      Stage 1: Zero-padded linear FFT at downsample=2 around nominal overlap (wrap-free).
+      Stage 2: Extract exact overlapping sub-rectangle at downsample=1 across up to 3 blocks
+               along the seam and return the consensus shift.
+    """
+    is_horiz = abs(nom_dx) >= abs(nom_dy)
+    max_dim = max(tile_w, tile_h)
+    ds1 = 4 if max_dim >= 3072 else (2 if max_dim >= 1024 else 1)
+
+    if is_horiz:
+        expected_ov = max(16, int(round(tile_w - abs(nom_dx))))
+        coarse_w = min(tile_w, max(expected_ov + int(tile_w * 0.12), int(tile_w * 0.24)))
+        xa0 = tile_w - coarse_w
+        xb0 = 0
+        crop_a = img_a[:, xa0:tile_w]
+        crop_b = img_b[:, xb0:coarse_w]
+        dx_s1, dy_s1, snr1 = _torch_phase_correlate(crop_a, crop_b, dev, downsample=ds1, linear_pad=True)
+        rel_x_c = (xa0 - xb0) + dx_s1
+        rel_y_c = dy_s1
+    else:
+        expected_ov = max(16, int(round(tile_h - abs(nom_dy))))
+        coarse_h = min(tile_h, max(expected_ov + int(tile_h * 0.12), int(tile_h * 0.24)))
+        ya0 = tile_h - coarse_h
+        yb0 = 0
+        crop_a = img_a[ya0:tile_h, :]
+        crop_b = img_b[yb0:coarse_h, :]
+        dx_s1, dy_s1, snr1 = _torch_phase_correlate(crop_a, crop_b, dev, downsample=ds1, linear_pad=True)
+        rel_x_c = dx_s1
+        rel_y_c = (ya0 - yb0) + dy_s1
+
+    if snr1 < (min_snr * 0.7) or math.hypot(rel_x_c - nom_dx, rel_y_c - nom_dy) > max_drift_px:
+        return None
+
+    # Stage 2: Exact overlapping sub-rectangle at full 1x resolution
+    rx_i = int(round(rel_x_c))
+    ry_i = int(round(rel_y_c))
+    ix0 = max(0, rx_i)
+    iy0 = max(0, ry_i)
+    ix1 = min(tile_w, rx_i + tile_w)
+    iy1 = min(tile_h, ry_i + tile_h)
+    ov_w = ix1 - ix0
+    ov_h = iy1 - iy0
+    if ov_w < 12 or ov_h < 12:
+        return None
+
+    ov_a = img_a[iy0:iy1, ix0:ix1]
+    ov_b = img_b[iy0 - ry_i:iy1 - ry_i, ix0 - rx_i:ix1 - rx_i]
+    t_alpha = 0.12 if min(ov_w, ov_h) < 48 else 0.22
+
+    # Split seam into up to 3 overlapping blocks along the long axis to reject local resin/charging regions
+    n_blocks = 3 if (ov_h >= 240 if is_horiz else ov_w >= 240) else 1
+    block_results = []
+    if n_blocks == 1:
+        dx2, dy2, snr2 = _torch_phase_correlate(ov_a, ov_b, dev, downsample=1, linear_pad=False, tukey_alpha=t_alpha)
+        if snr2 >= min_snr and math.hypot(dx2, dy2) <= 12.0:
+            block_results.append((rx_i + dx2, ry_i + dy2, snr2))
+    else:
+        for b_idx in range(n_blocks):
+            if is_horiz:
+                seg_h = int(ov_h * 0.45)
+                s0 = int((ov_h - seg_h) * (b_idx / float(n_blocks - 1)))
+                ba = ov_a[s0:s0 + seg_h, :]
+                bb = ov_b[s0:s0 + seg_h, :]
+            else:
+                seg_w = int(ov_w * 0.45)
+                s0 = int((ov_w - seg_w) * (b_idx / float(n_blocks - 1)))
+                ba = ov_a[:, s0:s0 + seg_w]
+                bb = ov_b[:, s0:s0 + seg_w]
+
+            dx2, dy2, snr2 = _torch_phase_correlate(ba, bb, dev, downsample=1, linear_pad=False, tukey_alpha=t_alpha)
+            if snr2 >= min_snr and math.hypot(dx2, dy2) <= 12.0:
+                block_results.append((rx_i + dx2, ry_i + dy2, snr2))
+
+    if not block_results:
+        return None
+
+    if len(block_results) >= 2:
+        xs = sorted(r[0] for r in block_results)
+        ys = sorted(r[1] for r in block_results)
+        med_x = xs[len(xs) // 2]
+        med_y = ys[len(ys) // 2]
+        inliers = [r for r in block_results if math.hypot(r[0] - med_x, r[1] - med_y) <= 3.5]
+        if not inliers:
+            return None
+        w_sum = sum(r[2] for r in inliers)
+        final_x = sum(r[0] * r[2] for r in inliers) / w_sum
+        final_y = sum(r[1] * r[2] for r in inliers) / w_sum
+        best_snr = max(r[2] for r in inliers)
+    else:
+        # Single block only: require stronger SNR to guard against blank-resin false peaks
+        if block_results[0][2] < (min_snr * 1.3):
+            return None
+        final_x, final_y, best_snr = block_results[0]
+
+    if math.hypot(final_x - nom_dx, final_y - nom_dy) > max_drift_px:
+        return None
+    return (final_x, final_y, best_snr)
+
+
+def estimate_grid_overlap(layer_tiles, tile_w, tile_h, default_overlap_frac, devices):
+    """
+    Probes central horizontal and vertical tile pairs to auto-detect actual
+    X and Y tile overlap fractions (handles 1%..30% overlap automatically).
+    """
+    coords = sorted(layer_tiles.keys())
+    if not coords:
+        return default_overlap_frac, default_overlap_frac
+    coord_set = set(coords)
+    mid_r = sum(r for r, _ in coords) / float(len(coords))
+    mid_c = sum(c for _, c in coords) / float(len(coords))
+
+    h_pairs = sorted(
+        [((r, c), (r, c + 1)) for (r, c) in coords if (r, c + 1) in coord_set],
+        key=lambda pair: abs(pair[0][0] - mid_r) + abs(pair[0][1] - mid_c),
+    )[:6]
+    v_pairs = sorted(
+        [((r, c), (r + 1, c)) for (r, c) in coords if (r + 1, c) in coord_set],
+        key=lambda pair: abs(pair[0][0] - mid_r) + abs(pair[0][1] - mid_c),
+    )[:6]
+    if not h_pairs and not v_pairs:
+        return default_overlap_frac, default_overlap_frac
+
+    needed = set()
+    for a, b in h_pairs + v_pairs:
+        needed.add(a)
+        needed.add(b)
+    imgs = {rc: tifffile.imread(layer_tiles[rc]) for rc in needed}
+    dev = devices[0]
+    ds = 4 if max(tile_w, tile_h) >= 2048 else 2
+
+    ov_x_samples = []
+    strip_w = min(tile_w, max(64, int(tile_w * 0.30)))
+    for a, b in h_pairs:
+        xa0 = tile_w - strip_w
+        dx, dy, snr = _torch_phase_correlate(imgs[a][:, xa0:tile_w], imgs[b][:, 0:strip_w], dev, downsample=ds, linear_pad=True)
+        rel_x = xa0 + dx
+        ov = (tile_w - rel_x) / float(tile_w)
+        if snr >= 7.0 and 0.01 <= ov <= 0.30 and abs(dy) <= tile_h * 0.08:
+            ov_x_samples.append(ov)
+
+    ov_y_samples = []
+    strip_h = min(tile_h, max(64, int(tile_h * 0.30)))
+    for a, b in v_pairs:
+        ya0 = tile_h - strip_h
+        dx, dy, snr = _torch_phase_correlate(imgs[a][ya0:tile_h, :], imgs[b][0:strip_h, :], dev, downsample=ds, linear_pad=True)
+        rel_y = ya0 + dy
+        ov = (tile_h - rel_y) / float(tile_h)
+        if snr >= 7.0 and 0.01 <= ov <= 0.30 and abs(dx) <= tile_w * 0.08:
+            ov_y_samples.append(ov)
+
+    ov_x = sorted(ov_x_samples)[len(ov_x_samples) // 2] if ov_x_samples else default_overlap_frac
+    ov_y = sorted(ov_y_samples)[len(ov_y_samples) // 2] if ov_y_samples else default_overlap_frac
+    return float(ov_x), float(ov_y)
+
+
+def _is_connected(n_nodes, edges):
+    if n_nodes <= 1:
+        return True
+    adj = [[] for _ in range(n_nodes)]
+    for ia, ib in edges:
+        adj[ia].append(ib)
+        adj[ib].append(ia)
+    seen = {0}
+    stack = [0]
+    while stack:
+        u = stack.pop()
+        for v in adj[u]:
+            if v not in seen:
+                seen.add(v)
+                stack.append(v)
+    return len(seen) == n_nodes
+
+
+def solve_2d_layer(layer_tiles, tile_w, tile_h, overlap_frac, devices, min_snr=5.5):
     coords = sorted(layer_tiles.keys())
     if not coords:
         return {}
 
+    if isinstance(overlap_frac, (tuple, list)):
+        ov_x, ov_y = float(overlap_frac[0]), float(overlap_frac[1])
+    else:
+        ov_x = ov_y = float(overlap_frac)
+
     min_r = min(r for r, _ in coords)
     min_c = min(c for _, c in coords)
-    step_x = tile_w * (1.0 - overlap_frac)
-    step_y = tile_h * (1.0 - overlap_frac)
+    step_x = tile_w * (1.0 - ov_x)
+    step_y = tile_h * (1.0 - ov_y)
 
     nominal_pos = {
         (r, c): ((c - min_c) * step_x, (r - min_r) * step_y)
@@ -192,43 +416,32 @@ def solve_2d_layer(layer_tiles, tile_w, tile_h, overlap_frac, devices, min_snr=6
         for rc, img in io_pool.map(_read_tile, coords):
             tile_imgs[rc] = img
 
-    strip_frac = min(0.35, overlap_frac * 1.5)
-    strip_w = int(round(tile_w * strip_frac))
-    strip_h = int(round(tile_h * strip_frac))
-
     pairs = []
     coord_set = set(coords)
     for (r, c) in coords:
         if (r, c + 1) in coord_set:
-            ox_a = tile_w - strip_w
-            pairs.append(((r, c), (r, c + 1), (ox_a, 0, strip_w, tile_h), (0, 0, strip_w, tile_h)))
+            pairs.append(((r, c), (r, c + 1)))
         if (r + 1, c) in coord_set:
-            oy_a = tile_h - strip_h
-            pairs.append(((r, c), (r + 1, c), (0, oy_a, tile_w, strip_h), (0, 0, tile_w, strip_h)))
+            pairs.append(((r, c), (r + 1, c)))
 
     if not pairs:
         return nominal_pos
 
-    max_drift_px = max(tile_w, tile_h) * 0.08
+    max_drift_px = max(tile_w, tile_h) * 0.12
     n_devs = len(devices)
     workers = n_devs * 2 if devices[0].type == "cuda" else 4
 
     def _match_pair(job):
-        idx, (rc_a, rc_b, box_a, box_b) = job
+        idx, (rc_a, rc_b) = job
         dev = devices[idx % n_devs]
-        xa, ya, wa, ha = box_a
-        xb, yb, wb, hb = box_b
-        crop_a = tile_imgs[rc_a][ya:ya + ha, xa:xa + wa]
-        crop_b = tile_imgs[rc_b][yb:yb + hb, xb:xb + wb]
-
-        dx_strip, dy_strip, snr = _torch_phase_correlate(crop_a, crop_b, dev, downsample=2)
-        rel_x = (xa - xb) - dx_strip
-        rel_y = (ya - yb) - dy_strip
-
         nom_dx = nominal_pos[rc_b][0] - nominal_pos[rc_a][0]
         nom_dy = nominal_pos[rc_b][1] - nominal_pos[rc_a][1]
-        if snr < min_snr or math.hypot(rel_x - nom_dx, rel_y - nom_dy) > max_drift_px:
+        res = _match_pair_coarse_to_fine(
+            tile_imgs[rc_a], tile_imgs[rc_b], tile_w, tile_h, nom_dx, nom_dy, max_drift_px, dev, min_snr=min_snr
+        )
+        if res is None:
             return None
+        rel_x, rel_y, snr = res
         return (rc_a, rc_b, rel_x, rel_y, snr)
 
     valid_edges = []
@@ -242,32 +455,62 @@ def solve_2d_layer(layer_tiles, tile_w, tile_h, overlap_frac, devices, min_snr=6
 
     idx_map = {rc: i for i, rc in enumerate(coords)}
     n_tiles = len(coords)
-    n_eqs = len(valid_edges) + n_tiles
 
-    A = lil_matrix((n_eqs, n_tiles), dtype=np.float64)
-    bx = np.zeros(n_eqs, dtype=np.float64)
-    by = np.zeros(n_eqs, dtype=np.float64)
+    def _solve_edges(edge_list):
+        degrees = [0] * n_tiles
+        for rc_a, rc_b, _, _, _ in edge_list:
+            degrees[idx_map[rc_a]] += 1
+            degrees[idx_map[rc_b]] += 1
 
-    row = 0
-    for rc_a, rc_b, rel_x, rel_y, snr in valid_edges:
-        w_edge = min(10.0, max(1.0, snr / min_snr))
-        ia, ib = idx_map[rc_a], idx_map[rc_b]
-        A[row, ib] = w_edge
-        A[row, ia] = -w_edge
-        bx[row] = w_edge * rel_x
-        by[row] = w_edge * rel_y
-        row += 1
+        n_eqs = len(edge_list) + n_tiles
+        A = lil_matrix((n_eqs, n_tiles), dtype=np.float64)
+        bx = np.zeros(n_eqs, dtype=np.float64)
+        by = np.zeros(n_eqs, dtype=np.float64)
 
-    for rc, i in idx_map.items():
-        w = 50.0 if i == 0 else 0.05
-        A[row, i] = w
-        bx[row] = w * nominal_pos[rc][0]
-        by[row] = w * nominal_pos[rc][1]
-        row += 1
+        row = 0
+        for rc_a, rc_b, rel_x, rel_y, snr in edge_list:
+            w_edge = min(10.0, max(1.0, snr / min_snr))
+            ia, ib = idx_map[rc_a], idx_map[rc_b]
+            A[row, ib] = w_edge
+            A[row, ia] = -w_edge
+            bx[row] = w_edge * rel_x
+            by[row] = w_edge * rel_y
+            row += 1
 
-    A_csr = A.tocsr()
-    sol_x = lsqr(A_csr, bx, atol=1e-6, btol=1e-6)[0]
-    sol_y = lsqr(A_csr, by, atol=1e-6, btol=1e-6)[0]
+        for rc, i in idx_map.items():
+            # Pin tile 0; keep weak anchor only for disconnected tiles so nominal spring doesn't fight real seams
+            w = 50.0 if i == 0 else (5.0 if degrees[i] == 0 else 0.01)
+            A[row, i] = w
+            bx[row] = w * nominal_pos[rc][0]
+            by[row] = w * nominal_pos[rc][1]
+            row += 1
+
+        A_csr = A.tocsr()
+        sx = lsqr(A_csr, bx, atol=1e-7, btol=1e-7)[0]
+        sy = lsqr(A_csr, by, atol=1e-7, btol=1e-7)[0]
+        return sx, sy
+
+    sol_x, sol_y = _solve_edges(valid_edges)
+
+    # IRLS outlier edge pruning: drop inconsistent edges (> 6 px residual) if graph connectivity permits
+    active_edges = list(valid_edges)
+    for _ in range(4):
+        if len(active_edges) <= n_tiles - 1:
+            break
+        residuals = []
+        for e_idx, (rc_a, rc_b, rel_x, rel_y, _) in enumerate(active_edges):
+            ia, ib = idx_map[rc_a], idx_map[rc_b]
+            err = math.hypot((sol_x[ib] - sol_x[ia]) - rel_x, (sol_y[ib] - sol_y[ia]) - rel_y)
+            residuals.append((err, e_idx))
+        worst_err, worst_idx = max(residuals, key=lambda t: t[0])
+        if worst_err <= 6.0:
+            break
+        candidate = [e for k, e in enumerate(active_edges) if k != worst_idx]
+        if _is_connected(n_tiles, [(idx_map[e[0]], idx_map[e[1]]) for e in candidate]):
+            active_edges = candidate
+            sol_x, sol_y = _solve_edges(active_edges)
+        else:
+            break
 
     return {rc: (float(sol_x[i]), float(sol_y[i])) for rc, i in idx_map.items()}
 
@@ -600,7 +843,7 @@ def write_trakem2_xml(xml_path, layer_records, tile_w, tile_h, is_16bit):
             '\t<t2_display id="%d" layer_id="%d" c_alphas="-1" c_alphas_state="-1" '
             'x="0" y="0" magnification="0.15" srcrect_x="0" srcrect_y="0" '
             'srcrect_width="%d" srcrect_height="%d" scroll_step="1" '
-            'filter_enabled="false" filter_min_max_enabled="false" filter_min="0.0" filter_max="255.0" '
+            'filter_enabled="false" filter_min_max_enabled="false" filter_min="0" filter_max="255" '
             'filter_invert="false" filter_clahe_enabled="false" filter_clahe_block_size="127" '
             'filter_clahe_histogram_bins="256" filter_clahe_max_slope="3.0" />\n' % (
                 oid_counter, first_layer_id, layer_w, layer_h
@@ -701,10 +944,13 @@ def run_pipeline(
     pos_2d_by_z = {}
     if is_spatial_mosaic:
         t1 = time.time()
-        print("\n[Pass 1/3] 2D Intra-Section Montaging (%d sections)..." % total_z, flush=True)
-        _emit("pass1", 0.02, 0.0, None, "[Pass 1/3] Starting 2D Montaging (%d sections)..." % total_z)
+        probe_z = sorted_zs[total_z // 2]
+        ov_x, ov_y = estimate_grid_overlap(tiles_by_z[probe_z], tile_w, tile_h, overlap_frac, devices)
+        print("\n[Pass 1/3] Detected overlap: X=%.2f%%, Y=%.2f%%" % (ov_x * 100.0, ov_y * 100.0), flush=True)
+        print("[Pass 1/3] 2D Intra-Section Montaging (%d sections)..." % total_z, flush=True)
+        _emit("pass1", 0.02, 0.0, None, "[Pass 1/3] Starting 2D Montaging (ov X=%.1f%%, Y=%.1f%%)..." % (ov_x * 100.0, ov_y * 100.0))
         for idx, z in enumerate(sorted_zs):
-            pos_2d_by_z[z] = solve_2d_layer(tiles_by_z[z], tile_w, tile_h, overlap_frac, devices)
+            pos_2d_by_z[z] = solve_2d_layer(tiles_by_z[z], tile_w, tile_h, (ov_x, ov_y), devices)
             done = idx + 1
             elapsed = time.time() - t1
             eta = (elapsed / done) * (total_z - done)
