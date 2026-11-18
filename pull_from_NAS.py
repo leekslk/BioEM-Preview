@@ -1089,7 +1089,40 @@ class NASPuller(ctk.CTk):
             self._set_action_buttons_state("disabled")
 
     # Context Menus & Local Data Management
+    def _ensure_context_menu_hooks(self):
+        if getattr(self, "_ctx_hooks_installed", False):
+            return
+        self._ctx_hooks_installed = True
+        self.bind("<ButtonPress>", self._on_root_click_close_menu, add="+")
+        self.bind("<Escape>", lambda _e: self._close_active_context_menu(), add="+")
+        self.bind("<FocusOut>", self._on_root_focus_out_menu, add="+")
+
+    def _arm_context_menu(self, menu_win):
+        if getattr(self, "_active_context_menu", None) is menu_win:
+            self._ctx_menu_armed = True
+
+    def _on_root_click_close_menu(self, _event=None):
+        if getattr(self, "_active_context_menu", None) is not None and getattr(self, "_ctx_menu_armed", False):
+            self._close_active_context_menu()
+
+    def _on_root_focus_out_menu(self, event=None):
+        if (
+            event is not None
+            and event.widget is self
+            and getattr(self, "_active_context_menu", None) is not None
+            and getattr(self, "_ctx_menu_armed", False)
+        ):
+            self.after(80, self._dismiss_if_app_unfocused)
+
     def _close_active_context_menu(self):
+        self._ctx_menu_armed = False
+        arm_id = getattr(self, "_ctx_arm_after_id", None)
+        if arm_id is not None:
+            try:
+                self.after_cancel(arm_id)
+            except Exception:
+                pass
+            self._ctx_arm_after_id = None
         menu_win = getattr(self, "_active_context_menu", None)
         if menu_win is not None:
             try:
@@ -1097,31 +1130,30 @@ class NASPuller(ctk.CTk):
             except Exception:
                 pass
             self._active_context_menu = None
-        bind_id = getattr(self, "_ctx_outside_bind_id", None)
-        if bind_id is not None:
-            try:
-                self.unbind("<ButtonPress>", bind_id)
-            except Exception:
-                pass
-            self._ctx_outside_bind_id = None
 
     def _popup_context_menu(self, event, items):
         """
-        Displays a Fluent left-aligned popup menu with fixed-width icon columns
-        so icon-to-text spacing and left alignment remain consistent.
-        `items` is a list of (icon, label, callback) tuples or "---" separators.
+        Displays a left-aligned popup menu with a fixed-width icon column so
+        icon-to-text spacing and left alignment remain consistent. Uses a raw
+        tk.Toplevel without stealing OS focus so overrideredirect(True) does
+        not immediately FocusOut/auto-dismiss on Windows.
         """
+        self._ensure_context_menu_hooks()
         self._close_active_context_menu()
 
-        menu_win = ctk.CTkToplevel(self)
+        menu_win = tk.Toplevel(self)
         menu_win.withdraw()
         menu_win.overrideredirect(True)
+        try:
+            menu_win.transient(self)
+        except Exception:
+            pass
         menu_win.attributes("-topmost", True)
+        menu_win.configure(bg="#c8c8c8")
         self._active_context_menu = menu_win
+        self._ctx_menu_armed = False
 
-        outer = ctk.CTkFrame(menu_win, fg_color="#d0d0d0", corner_radius=8)
-        outer.pack(fill="both", expand=True)
-        inner = ctk.CTkFrame(outer, fg_color="#ffffff", corner_radius=7)
+        inner = tk.Frame(menu_win, bg="#ffffff", padx=4, pady=4)
         inner.pack(fill="both", expand=True, padx=1, pady=1)
 
         def _invoke(cb):
@@ -1131,43 +1163,45 @@ class NASPuller(ctk.CTk):
 
         for entry in items:
             if entry == "---":
-                sep = ctk.CTkFrame(inner, height=1, fg_color="#e6e6e6")
-                sep.pack(fill="x", padx=8, pady=4)
+                sep = tk.Frame(inner, height=1, bg="#e6e6e6")
+                sep.pack(fill="x", padx=6, pady=4)
                 continue
 
             icon_txt, label_txt, callback = entry
-            row = ctk.CTkFrame(inner, fg_color="#ffffff", corner_radius=5, height=30)
-            row.pack(fill="x", padx=4, pady=2)
+            row = tk.Frame(inner, bg="#ffffff", cursor="hand2")
+            row.pack(fill="x", padx=2, pady=1)
+            row.grid_columnconfigure(0, minsize=28)
             row.grid_columnconfigure(1, weight=1)
 
-            icon_lbl = ctk.CTkLabel(
+            icon_lbl = tk.Label(
                 row,
                 text=icon_txt,
-                width=24,
-                font=("Segoe UI", 11),
-                text_color="#222222",
+                font=("Segoe UI Emoji" if sys.platform == "win32" else "Segoe UI", 10),
+                bg="#ffffff",
+                fg="#222222",
                 anchor="center",
             )
-            icon_lbl.grid(row=0, column=0, padx=(6, 4), pady=4, sticky="w")
+            icon_lbl.grid(row=0, column=0, padx=(4, 4), pady=5, sticky="nsew")
 
-            text_lbl = ctk.CTkLabel(
+            text_lbl = tk.Label(
                 row,
                 text=label_txt,
-                font=("Segoe UI", 11),
-                text_color="#111111",
+                font=("Segoe UI", 10),
+                bg="#ffffff",
+                fg="#111111",
                 anchor="w",
+                justify="left",
             )
-            text_lbl.grid(row=0, column=1, padx=(0, 12), pady=4, sticky="ew")
+            text_lbl.grid(row=0, column=1, padx=(2, 14), pady=5, sticky="ew")
 
-            def _on_enter(_e, r=row):
-                r.configure(fg_color="#eef4fb")
-
-            def _on_leave(_e, r=row):
-                r.configure(fg_color="#ffffff")
+            def _set_hover(_e, r=row, il=icon_lbl, tl=text_lbl, bg="#eef4fb"):
+                r.configure(bg=bg)
+                il.configure(bg=bg)
+                tl.configure(bg=bg)
 
             for widget in (row, icon_lbl, text_lbl):
-                widget.bind("<Enter>", _on_enter)
-                widget.bind("<Leave>", _on_leave)
+                widget.bind("<Enter>", lambda e, r=row, il=icon_lbl, tl=text_lbl: _set_hover(e, r, il, tl, "#eef4fb"))
+                widget.bind("<Leave>", lambda e, r=row, il=icon_lbl, tl=text_lbl: _set_hover(e, r, il, tl, "#ffffff"))
                 widget.bind("<Button-1>", lambda _e, cb=callback: _invoke(cb))
 
         menu_win.update_idletasks()
@@ -1175,28 +1209,26 @@ class NASPuller(ctk.CTk):
         req_h = menu_win.winfo_reqheight()
         scr_w = self.winfo_screenwidth()
         scr_h = self.winfo_screenheight()
-        pos_x = min(event.x_root, scr_w - req_w - 8)
-        pos_y = min(event.y_root, scr_h - req_h - 8)
+        pos_x = event.x_root
+        pos_y = event.y_root
+        if 0 <= pos_x <= scr_w:
+            pos_x = max(4, min(pos_x, scr_w - req_w - 8))
+        if 0 <= pos_y <= scr_h:
+            pos_y = max(4, min(pos_y, scr_h - req_h - 8))
         menu_win.geometry(f"{req_w}x{req_h}+{pos_x}+{pos_y}")
         menu_win.deiconify()
-        menu_win.focus_force()
+        menu_win.lift()
 
         menu_win.bind("<Escape>", lambda _e: self._close_active_context_menu())
-        menu_win.bind(
-            "<FocusOut>",
-            lambda _e: self.after(50, self._dismiss_if_unfocused),
-        )
-        self._ctx_outside_bind_id = self.bind(
-            "<ButtonPress>", lambda _e: self._close_active_context_menu(), add="+"
-        )
+        # Defer arming until after the opening right-click event finishes propagating
+        self._ctx_arm_after_id = self.after(60, lambda w=menu_win: self._arm_context_menu(w))
 
-    def _dismiss_if_unfocused(self):
+    def _dismiss_if_app_unfocused(self):
         menu_win = getattr(self, "_active_context_menu", None)
         if menu_win is None:
             return
         try:
-            focused = menu_win.focus_get()
-            if focused is None or focused.winfo_toplevel() != menu_win:
+            if self.focus_get() is None:
                 self._close_active_context_menu()
         except Exception:
             self._close_active_context_menu()
