@@ -11,13 +11,16 @@ if __name__ == "__main__":
         run_indexer_loop()
         sys.exit(0)
 
+import html
 import json
+import re
 import shutil
 import subprocess
 import threading
 import time
 import tkinter as tk
 from tkinter import filedialog, messagebox
+from xml.sax.saxutils import escape as xml_escape
 
 import customtkinter as ctk
 import psutil
@@ -29,12 +32,16 @@ from bioem_config import (
     deploy_fiji_watcher,
     detect_fiji_executable,
     ensure_indexer_running,
+    get_aligned_dataset_record,
     get_cache_file_path,
+    get_dataset_log_path,
     get_history_file_path,
     get_last_log_file_path,
     get_sync_cache_root,
     get_trigger_file_path,
     load_config,
+    record_aligned_dataset,
+    remove_aligned_dataset_record,
     resource_path,
     save_config,
 )
@@ -1233,6 +1240,222 @@ class NASPuller(ctk.CTk):
         except Exception:
             self._close_active_context_menu()
 
+    @staticmethod
+    def _has_any_tiff(folder_path):
+        if not folder_path or not os.path.isdir(folder_path):
+            return False
+        for _, _, files in os.walk(folder_path):
+            for fname in files:
+                if fname.lower().endswith((".tif", ".tiff")):
+                    return True
+        return False
+
+    @staticmethod
+    def _read_xml_text_with_encoding(xml_path):
+        with open(xml_path, "rb") as fb:
+            raw = fb.read()
+        m = re.search(br'encoding\s*=\s*["\']([^"\']+)["\']', raw[:200], flags=re.IGNORECASE)
+        enc = m.group(1).decode("ascii", errors="ignore") if m else "ISO-8859-1"
+        try:
+            text = raw.decode(enc)
+        except Exception:
+            enc = "ISO-8859-1"
+            text = raw.decode(enc, errors="replace")
+        return text, enc
+
+    @staticmethod
+    def _xml_references_synced_dir(xml_path, synced_dir, safe_folder_name):
+        if not xml_path or not os.path.isfile(xml_path):
+            return False
+        try:
+            text, _ = NASPuller._read_xml_text_with_encoding(xml_path)
+            if "<t2_patch" not in text:
+                return False
+            synced_norm = os.path.normpath(synced_dir).replace("\\", "/").rstrip("/").lower()
+            text_lower = text.replace("\\", "/").lower()
+            if synced_norm and synced_norm in text_lower:
+                return True
+            if safe_folder_name and (f"/{safe_folder_name.lower()}/") in text_lower:
+                return True
+            # Also match relative export-style XML referencing images already inside synced_dir
+            m = re.search(r'<t2_patch[^>]*\bfile_path\s*=\s*"([^"]+)"', text)
+            if m:
+                sample_fp = html.unescape(m.group(1)).replace("\\", "/")
+                sample_name = os.path.basename(sample_fp)
+                if sample_name and os.path.exists(os.path.join(synced_dir, sample_name)):
+                    return True
+            return False
+        except Exception:
+            return False
+
+    @staticmethod
+    def _rewrite_trakem2_xml_for_export(
+        src_xml_path,
+        dst_xml_path,
+        synced_dir,
+        copied_rel_map,
+        package_name=None,
+        rel_images_prefix="images",
+    ):
+        """
+        Rewrites <project> storage/mipmaps paths and every <t2_patch> file_path /
+        original_path to portable paths relative to dst_xml_path while preserving
+        the XML header and DOCTYPE verbatim. Also copies or initializes the
+        associated trakem2.<unuid> mipmaps directory beside dst_xml_path.
+        Returns count of rewritten patch links.
+        """
+        text, enc = NASPuller._read_xml_text_with_encoding(src_xml_path)
+        src_dir = os.path.dirname(os.path.abspath(src_xml_path))
+        dst_dir = os.path.dirname(os.path.abspath(dst_xml_path))
+
+        synced_norm = os.path.normpath(synced_dir).replace("\\", "/").rstrip("/") + "/"
+        synced_norm_lower = synced_norm.lower()
+        by_rel_lower = {k.replace("\\", "/").lstrip("/").lower(): v.replace("\\", "/").lstrip("/") for k, v in copied_rel_map.items()}
+        by_base_lower = {os.path.basename(k).lower(): v.replace("\\", "/").lstrip("/") for k, v in copied_rel_map.items()}
+
+        def _set_xml_attr(tag_text, attr_name, escaped_val):
+            pat = re.compile(rf'(\b{re.escape(attr_name)}\s*=\s*")([^"]*)(")')
+            if pat.search(tag_text):
+                return pat.sub(lambda m: f"{m.group(1)}{escaped_val}{m.group(3)}", tag_text, count=1)
+            return re.sub(r'(\s*/?>)$', lambda m: f' {attr_name}="{escaped_val}"{m.group(1)}', tag_text, count=1)
+
+        def _get_xml_attr(tag_text, attr_name):
+            m = re.search(rf'\b{re.escape(attr_name)}\s*=\s*"([^"]*)"', tag_text)
+            return html.unescape(m.group(1)) if m else None
+
+        def _map_to_rel_image(raw_path):
+            if not raw_path:
+                return None
+            norm = raw_path.replace("\\", "/")
+            if norm.lower().startswith(synced_norm_lower):
+                rel_cand = norm[len(synced_norm):].lstrip("/").lower()
+                if rel_cand in by_rel_lower:
+                    return f"{rel_images_prefix}/{by_rel_lower[rel_cand]}"
+            rel_direct = norm.lstrip("./").lower()
+            if rel_direct in by_rel_lower:
+                return f"{rel_images_prefix}/{by_rel_lower[rel_direct]}"
+            base = os.path.basename(norm).lower()
+            if base in by_base_lower:
+                return f"{rel_images_prefix}/{by_base_lower[base]}"
+            return None
+
+        # 1. Inspect & rewrite <project ...> + copy/initialize mipmaps folder
+        proj_match = re.search(r"<project\b[^>]*>", text)
+        if proj_match:
+            proj_tag = proj_match.group(0)
+            unuid = _get_xml_attr(proj_tag, "unuid")
+            orig_mipmaps = _get_xml_attr(proj_tag, "mipmaps_folder") or ""
+
+            src_trakem_root = None
+            trakem_dir_name = f"trakem2.{unuid}" if unuid else "trakem2.data"
+            rel_mipmaps_val = f"{trakem_dir_name}/trakem2.mipmaps/"
+
+            if orig_mipmaps:
+                orig_mf_norm = orig_mipmaps.replace("\\", "/").rstrip("/")
+                orig_mf_abs = orig_mf_norm if os.path.isabs(orig_mf_norm) else os.path.normpath(os.path.join(src_dir, orig_mf_norm))
+                if os.path.basename(orig_mf_abs).lower() == "trakem2.mipmaps":
+                    cand_root = os.path.dirname(orig_mf_abs)
+                    trakem_dir_name = os.path.basename(cand_root) or trakem_dir_name
+                    rel_mipmaps_val = f"{trakem_dir_name}/trakem2.mipmaps/"
+                    if os.path.isdir(cand_root):
+                        src_trakem_root = cand_root
+                elif os.path.isdir(orig_mf_abs):
+                    trakem_dir_name = os.path.basename(orig_mf_abs) or trakem_dir_name
+                    rel_mipmaps_val = f"{trakem_dir_name}/"
+                    src_trakem_root = orig_mf_abs
+
+            if src_trakem_root is None and unuid:
+                cand_root = os.path.join(src_dir, f"trakem2.{unuid}")
+                if os.path.isdir(cand_root):
+                    src_trakem_root = cand_root
+
+            dst_trakem_root = os.path.join(dst_dir, trakem_dir_name)
+            if src_trakem_root and os.path.isdir(src_trakem_root):
+                if os.path.abspath(src_trakem_root) != os.path.abspath(dst_trakem_root):
+                    shutil.copytree(src_trakem_root, dst_trakem_root, dirs_exist_ok=True)
+            os.makedirs(os.path.join(dst_dir, rel_mipmaps_val.rstrip("/")), exist_ok=True)
+
+            new_proj_tag = _set_xml_attr(proj_tag, "storage_folder", "./")
+            new_proj_tag = _set_xml_attr(new_proj_tag, "mipmaps_folder", xml_escape(rel_mipmaps_val, {'"': "&quot;"}))
+            if package_name:
+                new_proj_tag = _set_xml_attr(new_proj_tag, "title", xml_escape(package_name, {'"': "&quot;"}))
+            text = text[:proj_match.start()] + new_proj_tag + text[proj_match.end():]
+
+        # 2. Rewrite every <t2_patch ...> file_path / original_path
+        rewritten_patches = 0
+
+        def _replace_patch(m):
+            nonlocal rewritten_patches
+            tag = m.group(0)
+            orig_fp = _get_xml_attr(tag, "file_path")
+            mapped_fp = _map_to_rel_image(orig_fp)
+            if mapped_fp:
+                esc_fp = xml_escape(mapped_fp, {'"': "&quot;"})
+                tag = _set_xml_attr(tag, "file_path", esc_fp)
+                rewritten_patches += 1
+            if _get_xml_attr(tag, "original_path") is not None:
+                orig_op = _get_xml_attr(tag, "original_path")
+                mapped_op = _map_to_rel_image(orig_op) or mapped_fp
+                if mapped_op:
+                    tag = _set_xml_attr(tag, "original_path", xml_escape(mapped_op, {'"': "&quot;"}))
+            return tag
+
+        text = re.sub(r"<t2_patch\b[^>]*>", _replace_patch, text)
+
+        with open(dst_xml_path, "w", encoding=enc, errors="replace") as fw:
+            fw.write(text)
+        return rewritten_patches
+
+    def _get_exportable_dataset_info(self, source_path):
+        if not source_path:
+            return None
+        cfg = getattr(self, "config", None) or {}
+        dest_dir = cfg.get("destination_dir", DESTINATION_DIR)
+        project_name, safe_folder_name, display_title = self._extract_project_and_folder(source_path)
+
+        synced_dir = None
+        for cand in [
+            os.path.join(get_sync_cache_root(dest_dir), safe_folder_name),
+            os.path.join(dest_dir, "BioEM_Cache", safe_folder_name),
+        ]:
+            if self._has_any_tiff(cand):
+                synced_dir = cand
+                break
+        if not synced_dir:
+            return None
+
+        record = get_aligned_dataset_record(source_path)
+        xml_path = None
+        log_path = None
+        if isinstance(record, dict):
+            cand_xml = record.get("xml_path")
+            if cand_xml and os.path.isfile(cand_xml) and self._xml_references_synced_dir(cand_xml, synced_dir, safe_folder_name):
+                xml_path = cand_xml
+                cand_log = record.get("log_path")
+                if cand_log and os.path.isfile(cand_log):
+                    log_path = cand_log
+
+        if not xml_path:
+            desktop_xml = os.path.join(os.path.expanduser("~"), "Desktop", project_name, f"{project_name}.xml")
+            if os.path.isfile(desktop_xml) and self._xml_references_synced_dir(desktop_xml, synced_dir, safe_folder_name):
+                xml_path = desktop_xml
+                cand_log = get_dataset_log_path(safe_folder_name)
+                if os.path.isfile(cand_log):
+                    log_path = cand_log
+
+        if not xml_path:
+            return None
+
+        return {
+            "source_path": source_path,
+            "synced_dir": synced_dir,
+            "xml_path": xml_path,
+            "log_path": log_path,
+            "project_name": project_name,
+            "safe_folder_name": safe_folder_name,
+            "display_title": display_title,
+        }
+
     def _build_dataset_menu_items(self, path, acq_type="z-stack", rows=1, cols=1, include_remove=False):
         items = [
             (
@@ -1253,6 +1476,14 @@ class NASPuller(ctk.CTk):
                     ),
                 )
             )
+        if self._get_exportable_dataset_info(path) is not None:
+            items.append(
+                (
+                    "📦",
+                    "Export Data Package",
+                    lambda p=path: self.export_data_package(p),
+                )
+            )
         items.extend([
             "---",
             ("🔄", "Refresh Folder (Wipe & Sync)", lambda p=path: self.confirm_refresh(p)),
@@ -1264,6 +1495,136 @@ class NASPuller(ctk.CTk):
                 ("✖", "Remove from History", lambda p=path: self.remove_from_history(p)),
             ])
         return items
+
+    def export_data_package(self, source_path):
+        if self._is_busy:
+            return
+        info = self._get_exportable_dataset_info(source_path)
+        if not info:
+            messagebox.showinfo(
+                "Export Unavailable",
+                "This dataset must be synchronized, aligned, and have a saved TrakEM2 .xml project before exporting.",
+            )
+            return
+
+        initial_dir = os.path.join(os.path.expanduser("~"), "Desktop")
+        if not os.path.isdir(initial_dir):
+            initial_dir = os.path.expanduser("~")
+        chosen_root = filedialog.askdirectory(
+            title=f"Select Destination for '{info['safe_folder_name']}' Data Package",
+            initialdir=initial_dir,
+        )
+        if not chosen_root:
+            return
+
+        package_dir = os.path.join(chosen_root, info["safe_folder_name"])
+        if os.path.exists(package_dir):
+            overwrite = messagebox.askyesno(
+                "Package Folder Exists",
+                f"The destination folder already exists:\n{package_dir}\n\n"
+                "Update/overwrite files inside this package folder?",
+            )
+            if not overwrite:
+                return
+
+        self._is_busy = True
+        self._set_action_buttons_state("disabled")
+        self.progress.set(0)
+        worker = threading.Thread(
+            target=self._export_package_worker,
+            args=(info, package_dir),
+            daemon=True,
+        )
+        worker.start()
+
+    def _export_package_worker(self, info, package_dir):
+        safe_folder_name = info["safe_folder_name"]
+        display_title = info["display_title"]
+        synced_dir = info["synced_dir"]
+        src_xml_path = info["xml_path"]
+        log_path = info.get("log_path")
+
+        images_subdir = os.path.join(package_dir, "images")
+        dst_xml_path = os.path.join(package_dir, f"{safe_folder_name}.xml")
+
+        try:
+            self._reset_action_log(f"Export Data Package: {display_title} -> {package_dir}")
+            self.after(0, lambda: (
+                self.latest_path_label.configure(text=f"Exporting: {display_title}", text_color="#0078d4"),
+                self.status.configure(text="Collecting synchronized images for export...", text_color="#333333"),
+            ))
+
+            os.makedirs(images_subdir, exist_ok=True)
+            files_to_copy = []
+            for root, _, files in os.walk(synced_dir):
+                for fname in sorted(files):
+                    if fname.lower().endswith((".tif", ".tiff")):
+                        full_p = os.path.join(root, fname)
+                        rel_p = os.path.relpath(full_p, synced_dir).replace("\\", "/")
+                        files_to_copy.append((full_p, rel_p))
+
+            if not files_to_copy:
+                raise RuntimeError(f"No .tif/.tiff images found in {synced_dir}")
+
+            total = len(files_to_copy)
+            copied_rel_map = {}
+            t0 = time.time()
+            self._append_action_log(f"[Export] Copying {total} images from {synced_dir} -> {images_subdir}")
+
+            for idx, (src_file, rel_p) in enumerate(files_to_copy, start=1):
+                dst_file = os.path.join(images_subdir, rel_p.replace("/", os.sep))
+                os.makedirs(os.path.dirname(dst_file), exist_ok=True)
+                shutil.copy2(src_file, dst_file)
+                copied_rel_map[rel_p] = rel_p
+                if idx % 10 == 0 or idx == total:
+                    frac = 0.85 * (idx / float(total))
+                    elapsed = time.time() - t0
+                    eta = (elapsed / idx) * (total - idx)
+                    msg = (
+                        f"[Export] Copying images {idx}/{total} ({idx * 100.0 / total:.1f}%) | "
+                        f"Elapsed: {format_duration(elapsed)} | Remaining: {format_duration(eta)}"
+                    )
+                    self.after(0, lambda f=frac, m=msg: (
+                        self.progress.set(f),
+                        self.status.configure(text=m, text_color="#333333"),
+                    ))
+
+            self.after(0, lambda: (
+                self.progress.set(0.9),
+                self.status.configure(text="Rewriting TrakEM2 XML & copying mipmaps...", text_color="#333333"),
+            ))
+            rewritten = self._rewrite_trakem2_xml_for_export(
+                src_xml_path=src_xml_path,
+                dst_xml_path=dst_xml_path,
+                synced_dir=synced_dir,
+                copied_rel_map=copied_rel_map,
+                package_name=safe_folder_name,
+            )
+            self._append_action_log(f"[Export] Wrote portable XML ({rewritten} image links updated): {dst_xml_path}")
+
+            if log_path and os.path.isfile(log_path):
+                dst_log_path = os.path.join(package_dir, f"{safe_folder_name}_action.log")
+                shutil.copy2(log_path, dst_log_path)
+                self._append_action_log(f"[Export] Saved alignment log: {dst_log_path}")
+
+            stamp = time.strftime("%H:%M")
+            self._append_action_log(f"[Done] Data package exported in {format_duration(time.time() - t0)}: {package_dir}")
+            self._open_in_explorer(package_dir)
+            self.after(0, lambda: (
+                self.progress.set(1.0),
+                self.status.configure(text=f"✅ Exported data package: {safe_folder_name}", text_color="#2ecc71"),
+                self.latest_path_label.configure(text=f"Exported: {display_title} [{stamp}]", text_color="#2ecc71"),
+            ))
+        except Exception as exc:
+            err_msg = str(exc)
+            self._append_action_log(f"[ERROR] Export failed: {err_msg}")
+            self.after(0, lambda m=err_msg: (
+                self.status.configure(text=f"Export Error: {m}", text_color="#e74c3c"),
+                messagebox.showerror("Export Error", m),
+            ))
+        finally:
+            self._is_busy = False
+            self.after(0, lambda: self._set_action_buttons_state("normal"))
 
     def show_context_menu(self, event, path, acq_type="z-stack", rows=1, cols=1):
         items = self._build_dataset_menu_items(
@@ -1317,7 +1678,7 @@ class NASPuller(ctk.CTk):
 
         def on_delete():
             modal.destroy()
-            self.execute_delete_dataset(safe_folder_name)
+            self.execute_delete_dataset(safe_folder_name, source_path=source_path)
 
         ctk.CTkButton(
             btn_frame, text="Yes, remove local cache", fg_color="#c0392b", hover_color="#e74c3c",
@@ -1328,7 +1689,7 @@ class NASPuller(ctk.CTk):
             btn_frame, text="Cancel", fg_color="#7f8c8d", hover_color="#95a5a6", command=modal.destroy,
         ).pack(side="left", padx=12)
 
-    def execute_delete_dataset(self, safe_folder_name):
+    def execute_delete_dataset(self, safe_folder_name, source_path=None):
         dest_dir = self.config.get("destination_dir", DESTINATION_DIR)
         candidates = [
             os.path.join(get_sync_cache_root(dest_dir), safe_folder_name),
@@ -1339,6 +1700,9 @@ class NASPuller(ctk.CTk):
             if os.path.exists(target_dir):
                 shutil.rmtree(target_dir, ignore_errors=True)
                 purged = True
+
+        if source_path:
+            remove_aligned_dataset_record(source_path)
 
         if purged:
             self.status.configure(text=f"🗑️ Purged local cache: {safe_folder_name}", text_color="#e74c3c")
@@ -1393,6 +1757,7 @@ class NASPuller(ctk.CTk):
                         f"Could not delete local folder. Ensure no files are open in Fiji.\nError: {e}",
                     )
                     return
+        remove_aligned_dataset_record(source_folder)
         self.run_sync(source_folder)
 
     # Pull Latest & Manual Select
@@ -1695,6 +2060,32 @@ class NASPuller(ctk.CTk):
 
             stamp = time.strftime("%H:%M")
             self._append_action_log(f"[Done] Saved TrakEM2 XML and launched Fiji: {xml_path}")
+
+            dataset_log_path = get_dataset_log_path(safe_folder_name)
+            with self._log_lock:
+                try:
+                    last_log = get_last_log_file_path()
+                    if os.path.isfile(last_log):
+                        shutil.copy2(last_log, dataset_log_path)
+                except Exception:
+                    dataset_log_path = None
+            try:
+                record_aligned_dataset(
+                    source_folder,
+                    {
+                        "source_folder": source_folder,
+                        "synced_dir": final_dest,
+                        "xml_path": xml_path,
+                        "project_name": project_name,
+                        "safe_folder_name": safe_folder_name,
+                        "acq_type": acq_type,
+                        "log_path": dataset_log_path,
+                        "timestamp": time.time(),
+                    },
+                )
+            except Exception as rec_err:
+                print(f"Warning: could not record aligned dataset metadata: {rec_err}")
+
             self.after(0, lambda: (
                 self.progress.set(1.0),
                 self.status.configure(text=f"✅ Aligned & opened in Fiji: {os.path.basename(xml_path)}", text_color="#2ecc71"),

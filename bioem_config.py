@@ -24,6 +24,8 @@ CONFIG_FILENAME = "config.json"
 TRIGGER_FILENAME = "fiji_trigger.txt"
 INDEXER_PID_FILENAME = "indexer.pid"
 LAST_LOG_FILENAME = "last_action.log"
+ALIGNED_DATASETS_FILENAME = "aligned_datasets.json"
+DATASET_LOGS_DIRNAME = "dataset_logs"
 STARTUP_SCRIPT_NAME = "BioEM_NAS_Indexer.vbs"
 INDEXER_PROTOCOL_VERSION = 2
 
@@ -92,6 +94,72 @@ def get_trigger_file_path():
 def get_last_log_file_path():
     """Returns the file path storing the log lines of the last performed action."""
     return os.path.join(get_app_data_dir(), LAST_LOG_FILENAME)
+
+
+def get_aligned_datasets_path():
+    """Returns the registry file tracking datasets that have completed alignment and XML creation."""
+    return os.path.join(get_app_data_dir(), ALIGNED_DATASETS_FILENAME)
+
+
+def get_dataset_log_path(safe_folder_name):
+    """Returns the persistent per-dataset log file path inside app data."""
+    safe = "".join(c for c in (safe_folder_name or "dataset") if c.isalnum() or c in ["_", "-"]) or "dataset"
+    logs_dir = os.path.join(get_app_data_dir(), DATASET_LOGS_DIRNAME)
+    os.makedirs(logs_dir, exist_ok=True)
+    return os.path.join(logs_dir, f"{safe}.log")
+
+
+def _normalize_dataset_key(source_folder):
+    return (source_folder or "").replace("\\", "/").rstrip("/").lower()
+
+
+def load_aligned_datasets():
+    path = get_aligned_datasets_path()
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_aligned_datasets(records):
+    path = get_aligned_datasets_path()
+    tmp_path = path + ".tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(records, f, indent=2)
+    os.replace(tmp_path, path)
+
+
+def record_aligned_dataset(source_folder, record):
+    key = _normalize_dataset_key(source_folder)
+    if not key:
+        return
+    records = load_aligned_datasets()
+    records[key] = record
+    _save_aligned_datasets(records)
+
+
+def get_aligned_dataset_record(source_folder):
+    key = _normalize_dataset_key(source_folder)
+    if not key:
+        return None
+    return load_aligned_datasets().get(key)
+
+
+def remove_aligned_dataset_record(source_folder):
+    key = _normalize_dataset_key(source_folder)
+    if not key:
+        return
+    records = load_aligned_datasets()
+    if key in records:
+        del records[key]
+        try:
+            _save_aligned_datasets(records)
+        except Exception:
+            pass
 
 
 def get_sync_cache_root(destination_dir):
