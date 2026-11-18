@@ -22,6 +22,18 @@ hiddenimports = [
     "tifffile",
 ]
 hiddenimports += collect_submodules("scipy.sparse")
+hiddenimports += collect_submodules("scipy._lib")
+try:
+    hiddenimports += collect_submodules(
+        "scipy._external",
+        filter=lambda name: "dask" not in name and "cupy" not in name,
+    )
+except Exception:
+    pass
+try:
+    hiddenimports += collect_submodules("imagecodecs")
+except Exception:
+    pass
 
 a = Analysis(
     ["pull_from_NAS.py"],
