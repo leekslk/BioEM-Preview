@@ -3,6 +3,7 @@ import sys
 import re
 import time
 import math
+import json
 import random
 import argparse
 import subprocess
@@ -799,20 +800,32 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="BioEM Cross-Platform PyTorch Aligner")
     parser.add_argument("arg_string", nargs="?", help="Pipe-separated string: targetPath|projectName|rows|cols|mode")
     parser.add_argument("--fiji-exe", default=None, help="Path to Java 8 Fiji executable")
+    parser.add_argument("--overlap", type=float, default=10.0, help="Nominal tile overlap percentage")
+    parser.add_argument("--output-dir", default=None, help="Output directory for TrakEM2 XML project")
     parser.add_argument("--no-open", action="store_true", help="Do not launch Fiji automatically on completion")
+    parser.add_argument("--progress-json", action="store_true", help="Emit __BIOEM_PROGRESS__ JSON lines to stdout")
     args = parser.parse_args()
 
     if not args.arg_string:
         print("Usage: python bioem_torch_align.py \"/path/to/tiles|proj_name|4|3|mosaic-z\"")
         sys.exit(1)
 
+    def _cli_progress(info):
+        if args.progress_json:
+            print("__BIOEM_PROGRESS__:" + json.dumps(info), flush=True)
+
     parts = args.arg_string.split("|")
-    run_pipeline(
+    out_xml = run_pipeline(
         target_dir=parts[0],
         project_name=parts[1],
         rows=int(parts[2]),
         cols=int(parts[3]),
         mode=parts[4] if len(parts) >= 5 else "auto",
+        overlap_pct=args.overlap,
         fiji_exe=args.fiji_exe,
-        open_fiji=not args.no_open
+        open_fiji=not args.no_open,
+        output_dir=args.output_dir,
+        progress_callback=_cli_progress if args.progress_json else None,
     )
+    if args.progress_json:
+        print("__BIOEM_RESULT__:" + json.dumps({"xml_path": out_xml}), flush=True)

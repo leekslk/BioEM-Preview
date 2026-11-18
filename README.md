@@ -39,16 +39,17 @@ Moving large SBF-SEM tile streams across the network and configuring alignment p
 ---
 ### Option A: Download Pre-Built Release (GitHub Releases)
 
-1. Download the release archive from the **Releases** page on GitHub (note: GitHub Releases hosts the CPU-compatible pre-built archive due to GitHub's 2 GB per-file limit; for CUDA GPU acceleration, build locally using Option B).
+1. Download `Preview_beta-YYYYMMMDD.zip` from the **Releases** page on GitHub (~60–75 MB, universal self-bootstrapping archive).
 2. Extract the archive and move the extracted folder (keeping `Preview_beta-YYYYMMMDD.exe` and `_internal\` together) into **`C:\Program Files\BioEM Preview\`** (approve the administrator prompt if requested).
 3. Right-click `Preview_beta-YYYYMMMDD.exe` → **Send to → Desktop (create shortcut)** for convenient access.
 4. Double-click the shortcut to launch:
-   * On first launch, confirm your **Scratch Disk**, **NAS Raw Data**, **Fiji Executable**, and **Start background NAS crawler automatically** option, then click **Save & Deploy Sidecars**.
-   * Runtime settings and caches are stored per-user under `%APPDATA%\BioEM_Preview\`, so standard users do not need write access inside `Program Files`.
+   * On first launch, confirm your **Scratch Disk**, **NAS Raw Data**, and **Fiji Executable**, then click **Install / Update Engine** (auto-detects NVIDIA CUDA GPU vs CPU and installs an isolated PyTorch runtime into `%LOCALAPPDATA%\BioEM_Preview\runtime\`—or select an existing Python installation).
+   * Click **Save & Deploy Sidecars** to deploy `BioEM_Watcher.ijm` and start the background NAS indexer.
+   * Runtime settings, caches, and the alignment engine are stored per-user under `%APPDATA%` / `%LOCALAPPDATA%`, so standard users do not need write access inside `Program Files`.
 
-### Option B: Build Self-Contained CUDA/GPU Bundle via PowerShell (No Git Required)
+### Option B: Build from Source via PowerShell (No Git Required)
 
-Run the following PowerShell snippet on a Windows PC that has Python and PyTorch (`cu118`) + build dependencies installed (`customtkinter`, `psutil`, `numpy`, `scipy`, `tifffile`, `pyinstaller`):
+Run the following PowerShell snippet on a Windows PC with Python (`customtkinter`, `psutil`, `pyinstaller`) installed:
 
 ```powershell
 Get-Process Preview_beta* -ErrorAction SilentlyContinue | Stop-Process -Force

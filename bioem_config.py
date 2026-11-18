@@ -14,6 +14,8 @@ DEFAULT_CONFIG = {
     "app_path": r"C:\Users\User\Desktop\Fiji\fiji-windows-x64.exe",
     "auto_start_indexer": True,
     "overlap_pct": 10.0,
+    "engine_python": "",
+    "engine_variant": "auto",
 }
 
 CACHE_FILENAME = "fiji_latest_cache.json"

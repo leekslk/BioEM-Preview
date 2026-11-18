@@ -1,6 +1,6 @@
-# Build self-contained Windows --onedir package and ZIP archive:
+# Build lightweight self-bootstrapping Windows package and ZIP archive:
 #   dist\Preview_beta-YYYYMMMDD.zip
-# Usage (PowerShell on Windows with your target Python env active):
+# Usage (PowerShell on Windows):
 #   .\build_windows_release.ps1
 
 $ErrorActionPreference = "Stop"
@@ -11,22 +11,38 @@ try {
     $BuildName = "Preview_beta-$DateStamp"
     $env:BIOEM_BUILD_NAME = $BuildName
 
-    Write-Host "=== Building $BuildName ===" -ForegroundColor Cyan
+    Write-Host "=== Building Lightweight Core App: $BuildName ===" -ForegroundColor Cyan
 
     if (-not (Test-Path "Preview_beta.spec")) {
-        throw "Preview_beta.spec not found in $PSScriptRoot. Make sure all files from branch beta/v0.2 are pulled/copied into this folder."
+        throw "Preview_beta.spec not found in $PSScriptRoot."
     }
 
-    # Verify required build & runtime dependencies
-    python -c "import customtkinter, psutil, numpy, scipy, tifffile, torch, PyInstaller; print('Torch:', torch.__version__, '| CUDA compiled:', torch.version.cuda)"
+    # Verify only lightweight core build dependencies (no torch/scipy needed in build env)
+    python -c "import customtkinter, psutil, PyInstaller; print('Core build deps OK')"
     if ($LASTEXITCODE -ne 0) {
-        throw "Python dependency check failed."
+        throw "Missing core build dependencies. Install with: pip install customtkinter psutil pyinstaller"
+    }
+
+    # Bundle static uv.exe (~35 MB) so the app can bootstrap Python + PyTorch offline from system Python
+    if (-not (Test-Path "tools\uv.exe")) {
+        Write-Host "Downloading uv.exe for self-bootstrapping..." -ForegroundColor Cyan
+        New-Item -ItemType Directory -Force -Path "tools" | Out-Null
+        $uvZip = "$env:TEMP\uv-win64.zip"
+        Invoke-WebRequest -Uri "https://github.com/astral-sh/uv/releases/latest/download/uv-x86_64-pc-windows-msvc.zip" -OutFile $uvZip
+        $uvExtract = "$env:TEMP\uv-win64-extract"
+        if (Test-Path $uvExtract) { Remove-Item -Recurse -Force $uvExtract }
+        Expand-Archive -Path $uvZip -DestinationPath $uvExtract
+        $uvFound = Get-ChildItem -Path $uvExtract -Filter "uv.exe" -Recurse | Select-Object -First 1
+        if (-not $uvFound) { throw "uv.exe not found inside downloaded archive." }
+        Copy-Item -Path $uvFound.FullName -Destination "tools\uv.exe" -Force
+        Remove-Item -Force $uvZip -ErrorAction SilentlyContinue
+        Remove-Item -Recurse -Force $uvExtract -ErrorAction SilentlyContinue
     }
 
     # Clean prior build artifacts for this version
     if (Test-Path "build\$BuildName") { Remove-Item -Recurse -Force "build\$BuildName" }
     if (Test-Path "dist\$BuildName") { Remove-Item -Recurse -Force "dist\$BuildName" }
-    if (Test-Path "dist\$BuildName.zip") { Remove-Item -Force "dist\$BuildName.zip" }
+    if (Test-Path "dist\$BuildName*.zip") { Remove-Item -Force "dist\$BuildName*.zip" }
 
     pyinstaller --clean --noconfirm Preview_beta.spec
     if ($LASTEXITCODE -ne 0) {
@@ -41,26 +57,23 @@ try {
     $QuickStart = @"
 BioEM Preview ($BuildName) - Quick Start
 ========================================
-1. Extract this entire folder (keep $BuildName.exe and _internal\ together).
-2. Double-click $BuildName.exe.
-3. On first launch, confirm:
-   - Scratch Disk (DESTINATION_DIR, default D:\)
-   - NAS Raw Data (NAS_DIR, default I:\)
-   - Fiji (Java 8) Executable (APP_PATH)
-   - Auto-start background NAS indexer at Windows login
-4. Click "Save & Deploy Sidecars".
-   BioEM_Watcher.ijm will be placed into <Fiji>\macros\AutoRun\ automatically,
-   and the NAS indexer will run in the background with no separate Python install needed.
+1. Extract this folder (keep $BuildName.exe and _internal\ together) into:
+   C:\Program Files\BioEM Preview\
+2. Create a Desktop shortcut to $BuildName.exe and launch it.
+3. On first launch, confirm your Scratch Disk, NAS Drive, and Fiji path, then
+   click "Install / Update Engine" (auto-detects NVIDIA CUDA GPU vs CPU and
+   installs an isolated runtime in %LOCALAPPDATA%\BioEM_Preview\runtime).
+4. Click "Save & Deploy Sidecars" to install BioEM_Watcher.ijm into Fiji and
+   start the background NAS indexer automatically.
 "@
     Set-Content -Path "$OutDir\README_QUICKSTART.txt" -Value $QuickStart -Encoding UTF8
 
-    $Suffix = $env:BIOEM_ZIP_SUFFIX
-    $ZipName = if ($Suffix) { "$BuildName-$Suffix.zip" } else { "$BuildName.zip" }
-    $ZipPath = "dist\$ZipName"
-    Write-Host "Creating self-contained archive: $ZipPath ..." -ForegroundColor Cyan
+    $ZipPath = "dist\$BuildName.zip"
+    Write-Host "Creating archive: $ZipPath ..." -ForegroundColor Cyan
     Compress-Archive -Path $OutDir -DestinationPath $ZipPath -CompressionLevel Optimal
 
-    Write-Host "Done! Release bundle ready at: $ZipPath" -ForegroundColor Green
+    $SizeMB = [math]::Round((Get-Item $ZipPath).Length / 1MB, 1)
+    Write-Host "Done! Release bundle ready at: $ZipPath ($SizeMB MB)" -ForegroundColor Green
 }
 finally {
     Pop-Location

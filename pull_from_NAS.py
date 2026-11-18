@@ -37,6 +37,14 @@ from bioem_config import (
     resource_path,
     save_config,
 )
+from bioem_engine import (
+    detect_nvidia_gpus,
+    install_engine_runtime,
+    recommended_torch_variant,
+    resolve_engine_python,
+    run_align_subprocess,
+    validate_python_engine,
+)
 from nas_indexer import detect_acquisition_type
 
 # CONFIGURATION DEFAULTS (used to pre-populate the First-Run Setup Wizard)
@@ -63,34 +71,35 @@ def format_duration(seconds):
 
 
 class SetupDialog(ctk.CTkToplevel):
-    """First-run installation & Settings dialog prompting for local SSD, NAS, and Fiji paths."""
+    """First-run installation & Settings dialog prompting for paths and the on-demand PyTorch engine."""
 
     def __init__(self, parent, initial_cfg, is_first_run=False, on_saved=None):
         super().__init__(parent)
         self.on_saved = on_saved
         self.saved = False
+        self._installing_engine = False
         self.title("BioEM Preview — First-Run Setup" if is_first_run else "BioEM Preview — Settings")
-        self.geometry("680x430")
+        self.geometry("720x590")
         self.resizable(False, False)
         self.transient(parent)
         self.grab_set()
 
         header_text = (
-            "Welcome to BioEM Preview — Configure Paths"
+            "Welcome to BioEM Preview — Configure Paths & Engine"
             if is_first_run
             else "Application & Pipeline Settings"
         )
         ctk.CTkLabel(
             self, text=header_text, font=("Segoe UI", 18, "bold"), text_color="#111111"
-        ).pack(anchor="w", padx=25, pady=(20, 4))
+        ).pack(anchor="w", padx=25, pady=(18, 4))
 
         sub_text = (
-            "Select your local fast scratch disk, raw NAS drive, and Fiji (Java 8) executable.\n"
-            "Saving will automatically deploy BioEM_Watcher.ijm to Fiji and start the NAS indexer."
+            "Select your local scratch disk, raw NAS drive, and Fiji (Java 8) executable.\n"
+            "Saving deploys BioEM_Watcher.ijm to Fiji and starts the built-in NAS indexer."
         )
         ctk.CTkLabel(
             self, text=sub_text, font=("Segoe UI", 11), text_color="#555555", justify="left"
-        ).pack(anchor="w", padx=25, pady=(0, 15))
+        ).pack(anchor="w", padx=25, pady=(0, 12))
 
         form = ctk.CTkFrame(self, fg_color="transparent")
         form.pack(fill="x", padx=25)
@@ -100,6 +109,8 @@ class SetupDialog(ctk.CTkToplevel):
         self.var_nas = tk.StringVar(value=initial_cfg.get("nas_dir", NAS_DIR))
         detected_fiji = detect_fiji_executable(initial_cfg.get("app_path", APP_PATH))
         self.var_fiji = tk.StringVar(value=detected_fiji)
+        self.var_engine_py = tk.StringVar(value=initial_cfg.get("engine_python", ""))
+        self.var_variant = tk.StringVar(value=initial_cfg.get("engine_variant", "auto"))
         self.var_autostart = tk.BooleanVar(value=bool(initial_cfg.get("auto_start_indexer", True)))
 
         self._add_path_row(
@@ -115,47 +126,181 @@ class SetupDialog(ctk.CTkToplevel):
             var=self.var_fiji, browse_cmd=self._browse_fiji,
         )
 
+        # On-demand Alignment Engine Section
+        engine_box = ctk.CTkFrame(self, fg_color="#f5f7fa", corner_radius=8)
+        engine_box.pack(fill="x", padx=25, pady=(14, 6))
+
+        ctk.CTkLabel(
+            engine_box,
+            text="Alignment Engine (PyTorch + SciPy — stored per-user in %LOCALAPPDATA%)",
+            font=("Segoe UI", 12, "bold"),
+            text_color="#111111",
+        ).pack(anchor="w", padx=14, pady=(10, 4))
+
+        self.engine_status_lbl = ctk.CTkLabel(
+            engine_box,
+            text="Checking alignment engine...",
+            font=("Segoe UI", 11),
+            text_color="#555555",
+            wraplength=640,
+            justify="left",
+        )
+        self.engine_status_lbl.pack(anchor="w", padx=14, pady=(0, 8))
+
+        engine_ctrl = ctk.CTkFrame(engine_box, fg_color="transparent")
+        engine_ctrl.pack(fill="x", padx=14, pady=(0, 8))
+
+        ctk.CTkLabel(engine_ctrl, text="Compute Variant:", font=("Segoe UI", 11)).pack(side="left", padx=(0, 6))
+        self.opt_variant = ctk.CTkOptionMenu(
+            engine_ctrl,
+            values=["auto", "cu118", "cu124", "cpu"],
+            variable=self.var_variant,
+            width=105,
+        )
+        self.opt_variant.pack(side="left", padx=(0, 12))
+
+        self.btn_install_engine = ctk.CTkButton(
+            engine_ctrl,
+            text="⬇️ Install / Update Engine",
+            width=185,
+            fg_color="#0078d4",
+            hover_color="#2b88d8",
+            command=self._start_engine_install,
+        )
+        self.btn_install_engine.pack(side="left", padx=(0, 8))
+
+        self.btn_browse_python = ctk.CTkButton(
+            engine_ctrl,
+            text="Use Existing Python...",
+            width=155,
+            fg_color="#e5e5e5",
+            text_color="black",
+            hover_color="#d4d4d4",
+            command=self._browse_python,
+        )
+        self.btn_browse_python.pack(side="left")
+
+        self.engine_progress = ctk.CTkProgressBar(engine_box, progress_color="#0078d4")
+        self.engine_progress.set(0)
+        self.engine_progress.pack(fill="x", padx=14, pady=(2, 10))
+
         self.chk_autostart = ctk.CTkCheckBox(
             self,
             text="Start background NAS crawler (--indexer) automatically when logging into Windows",
             variable=self.var_autostart,
             font=("Segoe UI", 12),
         )
-        self.chk_autostart.pack(anchor="w", padx=25, pady=(18, 10))
-
-        self.feedback_lbl = ctk.CTkLabel(
-            self, text="", font=("Segoe UI", 11), text_color="#555555", wraplength=620, justify="left"
-        )
-        self.feedback_lbl.pack(anchor="w", padx=25, pady=(0, 10))
+        self.chk_autostart.pack(anchor="w", padx=25, pady=(12, 8))
 
         btn_bar = ctk.CTkFrame(self, fg_color="transparent")
-        btn_bar.pack(side="bottom", fill="x", padx=25, pady=20)
+        btn_bar.pack(side="bottom", fill="x", padx=25, pady=16)
 
         if not is_first_run:
-            ctk.CTkButton(
+            self.btn_cancel = ctk.CTkButton(
                 btn_bar, text="Cancel", width=110, fg_color="#d4d4d4",
                 text_color="black", hover_color="#c0c0c0", command=self.destroy,
-            ).pack(side="right", padx=(10, 0))
+            )
+            self.btn_cancel.pack(side="right", padx=(10, 0))
 
-        ctk.CTkButton(
-            btn_bar, text="Save & Deploy Sidecars", width=180,
+        self.btn_save = ctk.CTkButton(
+            btn_bar, text="Save & Deploy Sidecars", width=190,
             fg_color="#0078d4", hover_color="#2b88d8", font=("Segoe UI", 12, "bold"),
             command=self._save_and_apply,
-        ).pack(side="right")
+        )
+        self.btn_save.pack(side="right")
 
         self.protocol("WM_DELETE_WINDOW", self.destroy if not is_first_run else self._cancel_first_run)
+        threading.Thread(target=self._probe_engine_async, daemon=True).start()
+
+    def _probe_engine_async(self):
+        cfg_probe = {"engine_python": self.var_engine_py.get().strip()}
+        py_exe, desc = resolve_engine_python(cfg_probe)
+        gpus = detect_nvidia_gpus()
+        rec = recommended_torch_variant()
+        if py_exe:
+            self.var_engine_py.set(py_exe)
+            status_txt = f"✅ Ready: {desc}  ({py_exe})"
+            color = "#27ae60"
+            prog = 1.0
+        else:
+            gpu_note = f"NVIDIA GPU detected ({', '.join(gpus)}) → recommended: {rec}" if gpus else f"No NVIDIA GPU detected → recommended: {rec}"
+            status_txt = f"⚠️ Not installed yet ({gpu_note}). Click 'Install / Update Engine' or select an existing Python."
+            color = "#b7791f"
+            prog = 0.0
+        self.after(0, lambda: (
+            self.engine_status_lbl.configure(text=status_txt, text_color=color),
+            self.engine_progress.set(prog),
+        ))
+
+    def _start_engine_install(self):
+        if self._installing_engine:
+            return
+        self._installing_engine = True
+        self.btn_install_engine.configure(state="disabled", text="Installing...")
+        self.btn_browse_python.configure(state="disabled")
+        self.btn_save.configure(state="disabled")
+        self.engine_progress.set(0.02)
+        variant = self.var_variant.get()
+
+        def _worker():
+            try:
+                def _on_prog(frac, msg):
+                    self.after(0, lambda f=frac, m=msg: (
+                        self.engine_progress.set(f),
+                        self.engine_status_lbl.configure(text=m, text_color="#333333"),
+                    ))
+
+                py_exe, desc = install_engine_runtime(variant=variant, progress_cb=_on_prog)
+                self.var_engine_py.set(py_exe)
+                self.after(0, lambda: (
+                    self.engine_progress.set(1.0),
+                    self.engine_status_lbl.configure(text=f"✅ Installed & verified: {desc}", text_color="#27ae60"),
+                ))
+            except Exception as exc:
+                err = str(exc)
+                self.after(0, lambda e=err: (
+                    self.engine_progress.set(0),
+                    self.engine_status_lbl.configure(text=f"❌ Install failed: {e}", text_color="#e74c3c"),
+                    messagebox.showerror("Engine Install Error", e, parent=self),
+                ))
+            finally:
+                self._installing_engine = False
+                self.after(0, lambda: (
+                    self.btn_install_engine.configure(state="normal", text="⬇️ Install / Update Engine"),
+                    self.btn_browse_python.configure(state="normal"),
+                    self.btn_save.configure(state="normal"),
+                ))
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _browse_python(self):
+        filetypes = [("Python Executable", "python*.exe"), ("All Files", "*.*")] if sys.platform == "win32" else [("All Files", "*")]
+        chosen = filedialog.askopenfilename(title="Select Python Executable with PyTorch", filetypes=filetypes)
+        if not chosen:
+            return
+        ok, desc = validate_python_engine(chosen)
+        if ok:
+            self.var_engine_py.set(chosen)
+            self.engine_progress.set(1.0)
+            self.engine_status_lbl.configure(text=f"✅ Validated: {desc} ({chosen})", text_color="#27ae60")
+        else:
+            messagebox.showwarning(
+                "Missing Packages",
+                f"Selected Python cannot import torch/numpy/scipy/tifffile:\n{desc}",
+                parent=self,
+            )
 
     def _add_path_row(self, parent, row, label, var, browse_cmd):
         ctk.CTkLabel(parent, text=label, font=("Segoe UI", 12, "bold"), anchor="w").grid(
-            row=row, column=0, sticky="w", pady=8, padx=(0, 10)
+            row=row, column=0, sticky="w", pady=6, padx=(0, 10)
         )
         ctk.CTkEntry(parent, textvariable=var, font=("Segoe UI", 11)).grid(
-            row=row, column=1, sticky="ew", pady=8, padx=(0, 8)
+            row=row, column=1, sticky="ew", pady=6, padx=(0, 8)
         )
         ctk.CTkButton(
             parent, text="Browse...", width=85, fg_color="#e5e5e5",
             text_color="black", hover_color="#d4d4d4", command=browse_cmd,
-        ).grid(row=row, column=2, pady=8)
+        ).grid(row=row, column=2, pady=6)
 
     def _browse_dest(self):
         chosen = filedialog.askdirectory(title="Select Fast Scratch Disk / Cache Drive", initialdir=self.var_dest.get())
@@ -174,10 +319,13 @@ class SetupDialog(ctk.CTkToplevel):
             self.var_fiji.set(chosen)
 
     def _cancel_first_run(self):
-        # Even if closed early on first run, persist defaults so the app can start cleanly
+        if self._installing_engine:
+            return
         self._save_and_apply()
 
     def _save_and_apply(self):
+        if self._installing_engine:
+            return
         dest_dir = self.var_dest.get().strip() or DESTINATION_DIR
         nas_dir = self.var_nas.get().strip() or NAS_DIR
         fiji_exe = self.var_fiji.get().strip() or APP_PATH
@@ -188,6 +336,8 @@ class SetupDialog(ctk.CTkToplevel):
             "nas_dir": nas_dir,
             "app_path": fiji_exe,
             "auto_start_indexer": autostart,
+            "engine_python": self.var_engine_py.get().strip(),
+            "engine_variant": self.var_variant.get().strip() or "auto",
         })
 
         notices = []
@@ -1094,10 +1244,54 @@ class NASPuller(ctk.CTk):
                 self.latest_path_label.configure(
                     text=f"Aligning ({acq_type}, {rows}x{cols}): {display_title}", text_color="#8e44ad"
                 ),
-                self.status.configure(text="Starting BioEM PyTorch Aligner...", text_color="#333333"),
+                self.status.configure(text="Checking PyTorch alignment engine...", text_color="#333333"),
             ))
 
-            from bioem_torch_align import run_pipeline
+            engine_python, engine_desc = resolve_engine_python(self.config)
+            if not engine_python:
+                prompt_done = threading.Event()
+                should_install = [False]
+                variant = self.config.get("engine_variant", "auto")
+                rec_variant = recommended_torch_variant() if variant == "auto" else variant
+
+                def _ask_install():
+                    should_install[0] = messagebox.askyesno(
+                        "Alignment Engine Required",
+                        "The PyTorch alignment engine is not installed yet.\n\n"
+                        f"Download and install an isolated Python + PyTorch ({rec_variant}) runtime "
+                        "into %LOCALAPPDATA%\\BioEM_Preview\\runtime now?\n\n"
+                        "(Requires internet once; takes a few minutes.)",
+                        parent=self,
+                    )
+                    prompt_done.set()
+
+                self.after(0, _ask_install)
+                prompt_done.wait()
+
+                if not should_install[0]:
+                    self.after(0, lambda: (
+                        self.status.configure(
+                            text="Sync complete. Install Alignment Engine in Settings to run Mosaic alignment.",
+                            text_color="#b7791f",
+                        ),
+                        self.open_settings_dialog(),
+                    ))
+                    return
+
+                def _on_install_prog(frac, msg):
+                    self.after(0, lambda f=frac, m=msg: (
+                        self.progress.set(f),
+                        self.status.configure(text=m, text_color="#333333"),
+                    ))
+
+                engine_python, engine_desc = install_engine_runtime(
+                    variant=variant, progress_cb=_on_install_prog
+                )
+                self.config = load_config()
+
+            self.after(0, lambda d=engine_desc: self.status.configure(
+                text=f"Starting BioEM PyTorch Aligner ({d})...", text_color="#333333"
+            ))
 
             def on_align_progress(info):
                 frac = info.get("progress", 0.0)
@@ -1107,7 +1301,8 @@ class NASPuller(ctk.CTk):
                     self.status.configure(text=m, text_color="#333333"),
                 ))
 
-            xml_path = run_pipeline(
+            xml_path = run_align_subprocess(
+                python_exe=engine_python,
                 target_dir=final_dest,
                 project_name=project_name,
                 rows=rows,

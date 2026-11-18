@@ -6,6 +6,7 @@ __pycache__/
 !Preview_beta.spec
 build/
 dist/
+tools/
 .DS_Store
 
 # Acquisition data and local caches
